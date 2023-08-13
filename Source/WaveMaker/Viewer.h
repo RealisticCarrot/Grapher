@@ -41,6 +41,23 @@ public:
 
 };
 
+USTRUCT(BlueprintType)
+struct FRow
+{
+	GENERATED_BODY()
+
+public:
+
+	UPROPERTY(BlueprintReadWrite)
+		float timeMinutes;
+
+	UPROPERTY(BlueprintReadWrite)
+		TArray<FString> stringData;
+
+	UPROPERTY(BlueprintReadWrite)
+		TArray<float> data;
+};
+
 
 
 UCLASS()
@@ -91,6 +108,9 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		float mspTimeLoc;
 
+	UPROPERTY(BlueprintReadWrite)
+		float mspTimeSpanUnit;
+
 
 	UPROPERTY(EditAnywhere)
 		TSubclassOf<AMSPWindow> mspWindowClass;
@@ -102,6 +122,19 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		TArray<AMSPMarker2*> mspMarkers;
 	
+
+
+
+
+	// IMF STUFF
+	
+	UPROPERTY(BlueprintReadWrite)
+		TArray<FRow> imfData;
+
+
+
+
+
 
 
 
@@ -162,6 +195,14 @@ public:
 	UFUNCTION(BlueprintCallable)
 		FWindowManager getWindows();
 
+
+	UFUNCTION(BlueprintCallable)
+		FRow GetRow(FString inStr);
+
+	UFUNCTION(BlueprintCallable)
+		float AverageColumn(int col, FString startTime, FString endTime);
+
+	
 	
 
 };

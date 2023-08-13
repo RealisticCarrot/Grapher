@@ -151,6 +151,12 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		float endLoc;
 
+	UPROPERTY(BlueprintReadWrite)
+		float timeLoc;
+
+	UPROPERTY(BlueprintReadWrite)
+		float timeSpanUnit;
+
 
 	UPROPERTY(BlueprintReadOnly)
 		int timeSteps;

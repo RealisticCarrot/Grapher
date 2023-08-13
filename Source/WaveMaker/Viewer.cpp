@@ -192,8 +192,7 @@ void AViewer::Tick(float DeltaTime)
 
 	if (windows.mspWindows.Num() > 0) {
 		
-		windows.mspWindows[0]->setMSPscalar("start", mspTimeLoc - (rangeBarValue / 2.0f));
-		windows.mspWindows[0]->setMSPscalar("end", mspTimeLoc + (rangeBarValue / 2.0f));
+		windows.mspWindows[0]->timeLoc = mspTimeLoc;
 	}
 
 	
@@ -234,7 +233,7 @@ void AViewer::loadFile() {
 
 	IDesktopPlatform* deskPlatform = FDesktopPlatformModule::Get();//module.Get();
 
-	deskPlatform->OpenFileDialog(viewportHandle, "Open Data File", "|:/", "file.txt", "MSP Data|*.LY;*.ly|Text Files|*.txt", 0, outName);
+	deskPlatform->OpenFileDialog(viewportHandle, "Open Data File", "|:/", "file.txt", "MSP Data|*.LY;*.ly|Text Files|*.txt;*.lst", 0, outName);
 
 	if (outName.Num() > 0) {
 		FString outNameType;
@@ -268,8 +267,29 @@ void AViewer::loadFile() {
 
 		}
 
-		TArray<FString> dataText;
-		FFileHelper::LoadFileToStringArray(dataText, *outName[0]);
+
+		if (outNameType == (FString)"txt" || outNameType == (FString)"lst") {
+			TArray<FString> dataText;
+			FFileHelper::LoadFileToStringArray(dataText, *outName[0]);
+
+			for (int i = 0; i < dataText.Num(); i++) {
+				FString leftStr;
+				FString rightStr;
+
+				dataText[i].Split(" ", &leftStr, &rightStr);
+
+				//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, "Left:" + leftStr + "|Right:" + rightStr);
+				
+				imfData.Add(GetRow(dataText[i]));
+
+
+			}
+
+		}
+		
+
+
+
 		//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Black, outName[0]);
 
 		/*
@@ -280,6 +300,122 @@ void AViewer::loadFile() {
 		*/
 	}
 }
+
+
+
+FRow AViewer::GetRow(FString inStr) {
+
+
+	
+
+
+	FRow outRow;
+
+	FString leftStr = inStr.ConvertTabsToSpaces(3) + " ";
+	FString rightStr;
+
+	FString extractedValue;
+	/*
+	int n = 0;
+	while (leftStr.Len() > 0 && n < 100) {
+
+		
+		leftStr.Split(" ", &extractedValue, &rightStr);
+
+		outRow.stringData.Add(extractedValue);
+		outRow.data.Add(FCString::Atof(*extractedValue));
+		
+
+		leftStr = rightStr;
+
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, leftStr);
+		UE_LOG(LogTemp, Warning, TEXT("Left String: %s"), *extractedValue);
+
+		n++;
+
+	}
+	*/
+
+	
+	inStr.ParseIntoArray(outRow.stringData, TEXT(" "), true);
+
+	for (FString dataS : outRow.stringData) {
+		outRow.data.Add(FCString::Atof(*dataS));
+		//UE_LOG(LogTemp, Warning, TEXT("Left String: %f"), FCString::Atof(*dataS));
+	}
+
+
+	outRow.timeMinutes = (outRow.data[2] * 60.0f) + outRow.data[3];
+
+	return outRow;
+
+
+
+}
+
+
+float AViewer::AverageColumn(int col, FString startTime, FString endTime) {
+
+	FString hoursStr;
+	FString minutesStr;
+
+	startTime.Split(":", &hoursStr, &minutesStr);
+
+	float startMins = (FCString::Atof(*hoursStr) * 60.0f) + FCString::Atof(*minutesStr);
+
+
+
+	endTime.Split(":", &hoursStr, &minutesStr);
+
+	float endMins = (FCString::Atof(*hoursStr) * 60.0f) + FCString::Atof(*minutesStr);
+
+
+	float sum = 0.0f;
+	bool startAdding = false;
+	int n = 0;
+	if (imfData.Num() > 0) {
+		for (FRow row : imfData) {
+			
+
+			if (row.timeMinutes == startMins) {
+
+				startAdding = true;
+				sum += row.data[col];
+				n++;
+
+			}
+			else if (row.timeMinutes == endMins) {
+
+				
+
+				startAdding = false;
+
+				
+
+			}
+			else if (startAdding) {
+				sum += row.data[col];
+				n++;
+			}
+
+		}
+	}
+	else {
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, "No rows");
+		return 0.0f;
+	}
+
+
+	return sum / (float)n;
+
+	
+
+}
+
+
+
+
+
 
 
 FWindowManager AViewer::getWindows() {

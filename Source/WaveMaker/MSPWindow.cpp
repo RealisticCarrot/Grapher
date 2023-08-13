@@ -67,6 +67,7 @@ AMSPWindow::AMSPWindow()
 
 	//muv = FVector4(0.0f, 0.0f, 0.0f, 0.0f);
 
+	timeSpanUnit = -1.0f;
 
 	Tags.Add("MSPWindow");
 }
@@ -195,6 +196,16 @@ void AMSPWindow::Tick(float DeltaTime)
 
 	
 
+
+	if (timeSpanUnit > 0.0f) {
+		setMSPscalar("start", timeLoc - (timeSpanUnit / 2.0f));
+		setMSPscalar("end", timeLoc + (timeSpanUnit / 2.0f));
+
+	}
+
+
+
+
 	//materialInstance->SetScalarParameterValue("div", cosf(totalTime));
 	//materialInstance->SetScalarParameterValue("a", sinf(totalTime));
 	//materialInstance->SetScalarParameterValue("channel", totalTime / 10.0f);
@@ -259,6 +270,9 @@ void AMSPWindow::loadFile(FString fileName) {
 	peakTimes = fetchMSPdata("Time");
 	startTime = peakTimes[0];
 	endTime = peakTimes.Last();
+
+	//the unit length of 1 hour for this data set
+	timeSpanUnit = 3600.0f / (endTime - startTime);
 
 	UE_LOG(LogTemp, Warning, TEXT("peakData length %d"), peakData.Num());
 	//peakData.SetNum(15000);

@@ -29,6 +29,9 @@ class AMSPWindow;
 class AMSPMarker2;
 
 
+class AIMFWindow;
+
+
 
 USTRUCT(BlueprintType)
 struct FWindowManager
@@ -132,9 +135,13 @@ public:
 		TArray<FRow> imfData;
 
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+		TSubclassOf<AIMFWindow> imfWindowClass;
 
+	UPROPERTY(BlueprintReadWrite)
+		AIMFWindow* imfWindow;
 
-
+	
 
 
 
@@ -202,6 +209,9 @@ public:
 	UFUNCTION(BlueprintCallable)
 		float AverageColumn(int col, FString startTime, FString endTime);
 
+
+	UFUNCTION(BlueprintImplementableEvent)
+		void CreateIMFGraphWidgets();
 	
 	
 

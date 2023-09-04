@@ -34,6 +34,9 @@
 #include "MSPMarker2.h"
 
 
+#include "IMFWindow.h"
+
+
 // Sets default values
 AViewer::AViewer()
 {
@@ -282,8 +285,12 @@ void AViewer::loadFile() {
 				
 				imfData.Add(GetRow(dataText[i]));
 
-
+				
 			}
+
+
+			imfWindow = GetWorld()->SpawnActor<AIMFWindow>(imfWindowClass);
+
 
 		}
 		

@@ -9,7 +9,7 @@ public class WaveMaker : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "HeadMountedDisplay", "SlateCore", "Slate" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "HeadMountedDisplay", "SlateCore", "Slate", "UMG" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

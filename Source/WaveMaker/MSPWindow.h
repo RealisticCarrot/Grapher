@@ -86,6 +86,7 @@ public:
 
 
 class AMSPTimeline;
+class AMSPLegend;
 
 
 UCLASS()
@@ -114,6 +115,12 @@ public:
 
 	UPROPERTY(EditAnywhere)
 		TSubclassOf<AMSPTimeline> timelineClass;
+
+	UPROPERTY(EditAnywhere)
+		TSubclassOf<AMSPLegend> legendClass;
+
+	UPROPERTY(BlueprintReadOnly)
+		AMSPLegend* legendDisplay;
 
 
 	UPROPERTY()

@@ -25,6 +25,7 @@
 
 #include "MSPTimeline.h"
 
+#include "MSPLegend.h"
 
 
 
@@ -79,7 +80,7 @@ void AMSPWindow::BeginPlay()
 
 	//mspWindowPlane->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Script/Engine.StaticMesh'/Engine/BasicShapes/Plane.Plane'")));
 
-	mspWindowPlane->SetWorldScale3D(FVector(2.6f, 9.0f, 1.0f));
+	mspWindowPlane->SetWorldScale3D(FVector(2.6f, 8.7f, 1.0f));
 
 	if (!mspMaterial) {
 		FGenericPlatformMisc::RequestExit(false);
@@ -102,6 +103,7 @@ void AMSPWindow::BeginPlay()
 
 
 	timelineDisplay = GetWorld()->SpawnActor<AMSPTimeline>(timelineClass, GetActorLocation(), GetActorRotation());
+	legendDisplay = GetWorld()->SpawnActor<AMSPLegend>(legendClass, GetActorLocation(), GetActorRotation());
 	
 
 }
@@ -225,6 +227,10 @@ void AMSPWindow::setMSPscalar(FString paramName, float value) {
 	//update the parameters in the timeline material too
 	if (timelineDisplay) {
 		timelineDisplay->setMSPTimelineScalar(paramName, value);
+	}
+
+	if (legendDisplay) {
+		legendDisplay->setMSPLegendScalar(paramName, value);
 	}
 
 	if (paramName == "channel") {

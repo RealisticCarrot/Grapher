@@ -11,7 +11,6 @@ public class LargeBufferShader : ModuleRules
 
         PrivateIncludePaths.AddRange(new string[]
         {
-            "Runtime/Renderer/Private",
             "LargeBufferShader/Private"
         });
         if (Target.bBuildEditor == true)

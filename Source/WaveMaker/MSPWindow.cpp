@@ -4,7 +4,7 @@
 #include "MSPWindow.h"
 
 
-
+#include <limits>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +17,9 @@
 
 
 #include "Engine/Texture2D.h"
-#include "C:/Program Files/Epic Games/UE_5.1/Engine/Source/Runtime/Core/Public/HAL/UnrealMemory.h"
+#include "HAL/UnrealMemory.h"
+#include "Misc/Paths.h"
+#include "HAL/PlatformMisc.h"
 
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialLayersFunctions.h"
@@ -27,7 +29,12 @@
 
 #include "MSPLegend.h"
 
-
+// Windows headers for DLL loading check
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <Windows.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 float ncMax;
 float ncMin;
@@ -133,10 +140,12 @@ void AMSPWindow::Tick(float DeltaTime)
 	//check if the cursor is over an msp window
 	FHitResult cursorHit;
 	//get the cursor hit result
-	if (Cast<APlayerController>(GEngine->GetFirstLocalPlayerController(GetWorld()))->GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, false, cursorHit)) {
+	APlayerController* PlayerController = Cast<APlayerController>(GEngine->GetFirstLocalPlayerController(GetWorld()));
+	if (PlayerController && PlayerController->GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, false, cursorHit)) {
 		//if its a main msp window then get the hovered over time and value
-		if (cursorHit.GetActor()->ActorHasTag("MSPWindow")) {
-			APlayerController* viewer = Cast<APlayerController>(GEngine->GetFirstLocalPlayerController(GetWorld()));
+		AActor* HitActor = cursorHit.GetActor();
+		if (HitActor && HitActor->ActorHasTag("MSPWindow")) {
+			APlayerController* viewer = PlayerController;
 
 			FVector2D mouseLoc;
 			viewer->GetMousePosition(mouseLoc.X, mouseLoc.Y);
@@ -144,7 +153,7 @@ void AMSPWindow::Tick(float DeltaTime)
 			FVector boundOrigin;
 			FVector boundExtents;
 
-			cursorHit.GetActor()->GetActorBounds(true, boundOrigin, boundExtents);
+			HitActor->GetActorBounds(true, boundOrigin, boundExtents);
 
 
 			FVector2D topRight;
@@ -152,47 +161,49 @@ void AMSPWindow::Tick(float DeltaTime)
 			FVector2D bottomLeft;
 			viewer->ProjectWorldLocationToScreen(boundOrigin - boundExtents, bottomLeft);
 
-			FVector2D MUV = (mouseLoc - bottomLeft) / (topRight - bottomLeft);
+			// Prevent division by zero
+			FVector2D screenDiff = topRight - bottomLeft;
+			if (FMath::IsNearlyZero(screenDiff.X) || FMath::IsNearlyZero(screenDiff.Y))
+			{
+				// Skip this frame if screen bounds are degenerate
+			}
+			else
+			{
+				FVector2D MUV = (mouseLoc - bottomLeft) / screenDiff;
 
-			
+				mouseUV.X = MUV.X;
+				mouseUV.Y = MUV.Y;
 
-			mouseUV.X = MUV.X;
-			mouseUV.Y = MUV.Y;
+				FVector2D iMouseLoc = mouseLoc - bottomLeft;
+				iMouseLoc.Y *= -1.0f;
 
+				// Only process hover values if arrays have data
+				if (peakData.Num() > 0 && peakTimes.Num() > 0)
+				{
+					float timeSize = 181.0f * 6.0f;
+					
+					float valuepx = (MUV.X * (endLoc - startLoc)) + startLoc;
+					float valuepy = ((float)channel + (1.0f - MUV.Y));
+					float valuep = valuepx - valuepy;
 
+					int vIndx = (int)((valuepx * peakData.Num()) / timeSize) * (int)timeSize;
+					int vIndy = (int)(valuepy * 181.0f);
 
-			FVector2D iMouseLoc = mouseLoc - bottomLeft;
-			iMouseLoc.Y *= -1.0f;
+					int vInd = vIndx + vIndy;
 
-			float timeSize = 181.0f * 6.0f;
+					int valueIndex = (int)(valuep * (float)peakData.Num());
+					int timeIndex = (int)(((MUV.X * (endLoc - startLoc)) + startLoc) * (float)peakTimes.Num());
 
-			
-			
-			float valuepx = (MUV.X * (endLoc - startLoc)) + startLoc;
-			float valuepy = ((float)channel + (1.0f - MUV.Y));
-			float valuep = valuepx - valuepy;
+					//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Yellow, FString::SanitizeFloat( vIndy ));
+					//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, (mouseLoc - bottomLeft).ToString());
 
+					vInd = FMath::Clamp(vInd, 0, peakData.Num() - 1);
+					timeIndex = FMath::Clamp(timeIndex, 0, peakTimes.Num() - 1);
 
-			int vIndx = (int)((valuepx * peakData.Num()) / timeSize) * (int)timeSize;
-			int vIndy = (int)(valuepy * 181.0f);
-
-			int vInd = vIndx + vIndy;
-
-
-			int valueIndex = (int)(valuep * (float)peakData.Num());
-			int timeIndex = (int)(((MUV.X * (endLoc - startLoc)) + startLoc) * (float)peakTimes.Num());
-
-			//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Yellow, FString::SanitizeFloat( vIndy ));
-
-			//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, (mouseLoc - bottomLeft).ToString());
-
-			vInd = FMath::Clamp(vInd, 0, peakData.Num() - 1);
-			timeIndex = FMath::Clamp(timeIndex, 0, peakTimes.Num() - 1);
-
-
-			mspHoverValue = peakData[vInd];
-			mspHoverTime = peakTimes[timeIndex];
-
+					mspHoverValue = peakData[vInd];
+					mspHoverTime = peakTimes[timeIndex];
+				}
+			}
 		}
 	}
 
@@ -261,6 +272,18 @@ void AMSPWindow::loadFile(FString fileName) {
 
 
 	mspParsingProcedure(fileName, mspNames, mspValues, mspSizes);
+	
+	// Check if parsing was successful - if not, return early to prevent crashes
+	if (mspNames.Num() == 0 || mspValues.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Failed to parse MSP file: %s"), *fileName);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("Failed to load MSP file - parsing failed"));
+		}
+		return;
+	}
+	
 	//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, mspNames[0]);
 
 	//loop through each variable name and get its data length
@@ -271,14 +294,47 @@ void AMSPWindow::loadFile(FString fileName) {
 
 	peakData = fetchMSPdata("PeakIntensity");
 	
+	// Check if we got valid peak data
+	if (peakData.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("No PeakIntensity data found in MSP file"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("No PeakIntensity data in file"));
+		}
+		return;
+	}
+	
 	timeSteps = (int)(peakData.Num() / (6.0f * 181.0f));
 
 	peakTimes = fetchMSPdata("Time");
+	
+	// Check if we got valid time data
+	if (peakTimes.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("No Time data found in MSP file"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("No Time data in file"));
+		}
+		return;
+	}
+	
 	startTime = peakTimes[0];
 	endTime = peakTimes.Last();
 
-	//the unit length of 1 hour for this data set
-	timeSpanUnit = 3600.0f / (endTime - startTime);
+	// Prevent divide by zero
+	float timeDiff = endTime - startTime;
+	if (FMath::IsNearlyZero(timeDiff))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Time range is zero, using default timeSpanUnit"));
+		timeSpanUnit = 1.0f;
+	}
+	else
+	{
+		//the unit length of 1 hour for this data set
+		timeSpanUnit = 3600.0f / timeDiff;
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("peakData length %d"), peakData.Num());
 	//peakData.SetNum(15000);
@@ -331,6 +387,8 @@ void AMSPWindow::loadFile(FString fileName) {
 	
 	mspWindowPlane->SetMaterial(0, materialInstance);
 
+	// Mark data as loaded so Blueprints know it's safe to access peakTimes/peakData
+	bIsDataLoaded = true;
 }
 
 
@@ -349,26 +407,33 @@ TArray<float> AMSPWindow::fetchMSPdata(FString dataKey) {
 
 
 void AMSPWindow::getMspProperties(TArray<float> data) {
-	float minV = INFINITY;
-	float maxV = -INFINITY;
+	// Handle empty data array
+	if (data.Num() == 0)
+	{
+		mspProperties.dataLength = 0;
+		mspProperties.maxValue = 0.0f;
+		mspProperties.minValue = 0.0f;
+		mspProperties.avgValue = 0.0f;
+		return;
+	}
 	
+	float minV = std::numeric_limits<float>::infinity();
+	float maxV = -std::numeric_limits<float>::infinity();
+
 	float sumV = 0.0f;
 
 	for (int i = 0; i < data.Num(); i++) {
 		maxV = fmaxf(maxV, data[i]);
 		minV = fminf(minV, data[i]);
-
 		sumV += data[i];
-
 	}
 
 	mspProperties.dataLength = data.Num();
-
 	mspProperties.maxValue = maxV;
 	mspProperties.minValue = minV;
 	mspProperties.avgValue = sumV / (float)data.Num();
-
 }
+
 
 
 
@@ -413,7 +478,11 @@ UTexture2D* AMSPWindow::UpdateTextureFrom32BitFloat(TArray<float> data, int widt
 
 
 void AMSPWindow::printTime(float t) {
-	//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Black, FString::SanitizeFloat(peakTimes[(int)(t * (peakTimes.Num() - 1))]));
+	if (peakTimes.Num() > 0)
+	{
+		int index = FMath::Clamp((int)(t * (peakTimes.Num() - 1)), 0, peakTimes.Num() - 1);
+		//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Black, FString::SanitizeFloat(peakTimes[index]));
+	}
 }
 
 
@@ -463,9 +532,73 @@ uint32 AMSPWindow::getSizeOfDimVector(TArray<uint32> dimVector, int dimCount) {
 }
 
 
+// Helper function to add netCDF DLL directory to search path and check availability
+static bool IsNetCDFAvailable()
+{
+#if PLATFORM_WINDOWS
+	// Get the project's ThirdParty/netCDF/bin path
+	FString ProjectDir = FPaths::ProjectDir();
+	FString NetCDFBinPath = FPaths::Combine(ProjectDir, TEXT("ThirdParty"), TEXT("netCDF"), TEXT("bin"));
+	FPaths::NormalizeDirectoryName(NetCDFBinPath);
+	
+	// Convert to absolute path
+	NetCDFBinPath = FPaths::ConvertRelativePathToFull(NetCDFBinPath);
+	
+	// Add the netCDF bin directory to the DLL search path
+	// This allows Windows to find netcdf.dll and its dependencies
+	SetDllDirectoryW(*NetCDFBinPath);
+	
+	// Also try adding to the PATH environment variable as a fallback
+	FString CurrentPath = FPlatformMisc::GetEnvironmentVariable(TEXT("PATH"));
+	FString NewPath = NetCDFBinPath + TEXT(";") + CurrentPath;
+	FPlatformMisc::SetEnvironmentVar(TEXT("PATH"), *NewPath);
+	
+	UE_LOG(LogTemp, Log, TEXT("Added netCDF bin path to DLL search: %s"), *NetCDFBinPath);
+	
+	// Try to load netcdf.dll to check if it's available
+	HMODULE hModule = LoadLibraryW(*FPaths::Combine(NetCDFBinPath, TEXT("netcdf.dll")));
+	if (hModule != nullptr)
+	{
+		FreeLibrary(hModule);
+		return true;
+	}
+	
+	// Also try loading from standard paths (in case it's installed system-wide)
+	hModule = LoadLibraryA("netcdf.dll");
+	if (hModule != nullptr)
+	{
+		FreeLibrary(hModule);
+		return true;
+	}
+	
+	return false;
+#else
+	// On non-Windows platforms, assume it's available if we got this far
+	return true;
+#endif
+}
 
 
 void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& refNames, TArray<FloatTArray>& refValues, TArray<uint32>& refSizes) {
+
+	// Check if netCDF library is available before attempting to use it
+	if (!IsNetCDFAvailable())
+	{
+		UE_LOG(LogTemp, Error, TEXT("netcdf.dll not found! Please ensure the netCDF library DLLs are in ThirdParty/netCDF/bin/ or in your system PATH."));
+		UE_LOG(LogTemp, Error, TEXT("Required DLLs: netcdf.dll, hdf5.dll, hdf5_hl.dll, zlib1.dll, and their dependencies."));
+		
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("ERROR: netcdf.dll not found!"));
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("Copy netCDF DLLs to ThirdParty/netCDF/bin/ folder"));
+		}
+		
+		// Initialize empty arrays to prevent further crashes
+		refNames.Empty();
+		refValues.Empty();
+		refSizes.Empty();
+		return;
+	}
 
 
 	//print("mspProcedure running");
@@ -659,4 +792,47 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 }
 
 
+// Safe accessor for peakTimes - returns 0 if index is out of bounds or data not loaded
+float AMSPWindow::GetPeakTimeAtIndex(int32 Index) const
+{
+	if (!bIsDataLoaded || peakTimes.Num() == 0)
+	{
+		return 0.0f;
+	}
+	
+	if (Index < 0 || Index >= peakTimes.Num())
+	{
+		return 0.0f;
+	}
+	
+	return peakTimes[Index];
+}
+
+// Safe accessor for peakData - returns 0 if index is out of bounds or data not loaded
+float AMSPWindow::GetPeakDataAtIndex(int32 Index) const
+{
+	if (!bIsDataLoaded || peakData.Num() == 0)
+	{
+		return 0.0f;
+	}
+	
+	if (Index < 0 || Index >= peakData.Num())
+	{
+		return 0.0f;
+	}
+	
+	return peakData[Index];
+}
+
+// Get the number of peak time entries
+int32 AMSPWindow::GetPeakTimesCount() const
+{
+	return peakTimes.Num();
+}
+
+// Get the number of peak data entries
+int32 AMSPWindow::GetPeakDataCount() const
+{
+	return peakData.Num();
+}
 

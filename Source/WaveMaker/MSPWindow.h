@@ -144,6 +144,10 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 		TArray<float> peakData;
 
+	// Flag to check if MSP data has been loaded - check this before accessing peakTimes/peakData
+	UPROPERTY(BlueprintReadOnly)
+		bool bIsDataLoaded = false;
+
 
 	UPROPERTY(BlueprintReadOnly)
 		TArray<float> mspWavelengths;
@@ -236,5 +240,21 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 		void printTime(float t);
+
+	// Safe accessor for peakTimes - returns 0 if index is out of bounds or data not loaded
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Data")
+		float GetPeakTimeAtIndex(int32 Index) const;
+
+	// Safe accessor for peakData - returns 0 if index is out of bounds or data not loaded
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Data")
+		float GetPeakDataAtIndex(int32 Index) const;
+
+	// Get the number of peak time entries
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Data")
+		int32 GetPeakTimesCount() const;
+
+	// Get the number of peak data entries
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Data")
+		int32 GetPeakDataCount() const;
 
 };

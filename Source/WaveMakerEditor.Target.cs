@@ -10,6 +10,6 @@ public class WaveMakerEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V2;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_1;
-		ExtraModuleNames.Add("WaveMaker");
-	}
+        ExtraModuleNames.Add("WaveMaker");
+    }
 }

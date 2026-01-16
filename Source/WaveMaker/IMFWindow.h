@@ -18,7 +18,7 @@ public:
 		TArray<FVector2D> points;
 
 	UPROPERTY(BlueprintReadWrite)
-		FColor color;
+		FColor color = FColor::White;
 
 
 };
@@ -76,5 +76,22 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 		TArray<FLineChain> GetDrawPointsForArcTan(int colX, int colY);
+
+	// Auto-calculate and set the Y-axis scale based on data in the specified column
+	UFUNCTION(BlueprintCallable)
+		void AutoScaleYAxis(int col);
+
+	// Get the number of data columns available
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		int GetColumnCount() const;
+
+	// Get Y-axis label values (evenly spaced between graphScaleMin and graphScaleMax)
+	// NumLabels: how many labels you want (e.g., 5 gives you min, 25%, 50%, 75%, max)
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		TArray<float> GetYAxisLabelValues(int NumLabels = 5) const;
+
+	// Get the screen Y position for a given data value (for positioning Y-axis labels)
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		float GetScreenYForValue(float Value) const;
 
 };

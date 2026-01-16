@@ -1,93 +1,108 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-using System;
 using System.IO;
 using UnrealBuildTool;
 
 public class WaveMaker : ModuleRules
 {
-	public WaveMaker(ReadOnlyTargetRules Target) : base(Target)
-	{
-		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "HeadMountedDisplay", "SlateCore", "Slate", "UMG" });
+    public WaveMaker(ReadOnlyTargetRules Target) : base(Target)
+    {
+        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+        PublicDependencyModuleNames.AddRange(new string[]
+        {
+            "Core",
+            "CoreUObject",
+            "Engine",
+            "InputCore",
+            "EnhancedInput",
+            "HeadMountedDisplay",
+            "SlateCore",
+            "Slate",
+            "UMG"
+        });
 
-        // Uncomment if you are using Slate UI
-        // PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
+        PrivateDependencyModuleNames.AddRange(new string[] { });
 
-        // Uncomment if you are using online features
-        // PrivateDependencyModuleNames.Add("OnlineSubsystem");
+        //
+        // netCDF (Windows) setup - PROJECT LOCAL (packaging-safe)
+        //
+        // Put these folders in your project root (same level as WaveMaker.uproject):
+        //   ThirdParty/netCDF/include
+        //   ThirdParty/netCDF/lib
+        //   ThirdParty/netCDF/bin
+        //
+        // Copy from:
+        //   C:\Program Files\netCDF 4.9.2\include -> ThirdParty\netCDF\include
+        //   C:\Program Files\netCDF 4.9.2\lib     -> ThirdParty\netCDF\lib
+        //   C:\Program Files\netCDF 4.9.2\bin     -> ThirdParty\netCDF\bin
+        //
 
-        // To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
+        string ProjectDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
+        string NetCDFRoot = Path.Combine(ProjectDir, "ThirdParty", "netCDF");
+        string NetCDFInclude = Path.Combine(NetCDFRoot, "include");
+        string NetCDFLib = Path.Combine(NetCDFRoot, "lib");
+        string NetCDFBin = Path.Combine(NetCDFRoot, "bin");
 
-
-
-        // windows schtuff
-
-        // Add any macros that need to be set
         PublicDefinitions.Add("WITH_NetCDFLib=1");
+        PublicIncludePaths.Add(NetCDFInclude);
 
-        // Add any include paths for the plugin
-        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\include"));
+        // Link libraries
+        PublicAdditionalLibraries.AddRange(new string[]
+        {
+            Path.Combine(NetCDFLib, "netcdf.lib"),
+            Path.Combine(NetCDFLib, "hdf.lib"),
+            Path.Combine(NetCDFLib, "hdf5.lib"),
+            Path.Combine(NetCDFLib, "hdf5_hl.lib"),
+            Path.Combine(NetCDFLib, "hdf5_tools.lib"),
+            Path.Combine(NetCDFLib, "jpeg.lib"),
+            Path.Combine(NetCDFLib, "libcurl_imp.lib"),
+            Path.Combine(NetCDFLib, "libhdf.lib"),
+            Path.Combine(NetCDFLib, "libhdf5.lib"),
+            Path.Combine(NetCDFLib, "libhdf5_hl.lib"),
+            Path.Combine(NetCDFLib, "libhdf5_tools.lib"),
+            Path.Combine(NetCDFLib, "libmfhdf.lib"),
+            Path.Combine(NetCDFLib, "libxdr.lib"),
+            Path.Combine(NetCDFLib, "mfhdf.lib"),
+            Path.Combine(NetCDFLib, "xdr.lib"),
+            Path.Combine(NetCDFLib, "zlib.lib"),
+            Path.Combine(NetCDFLib, "zlibstatic.lib"),
+        });
 
-        // Add any import libraries or static libraries
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "hdf.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "hdf5.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "hdf5_hl.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "hdf5_tools.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "jpeg.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libcurl_imp.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libhdf.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libhdf5.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libhdf5_hl.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libhdf5_tools.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libmfhdf.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "libxdr.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "mfhdf.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "netcdf.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "xdr.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "zlib.lib"));
-        PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "C:\\Program Files\\netCDF 4.9.2\\lib", "zlibstatic.lib"));
+        // Delay-load DLLs
+        PublicDelayLoadDLLs.AddRange(new string[]
+        {
+            "netcdf.dll",
+            "hdf.dll",
+            "hdf5.dll",
+            "hdf5_hl.dll",
+            "hdf5_tools.dll",
+            "jpeg.dll",
+            "libcurl.dll",
+            "mfhdf.dll",
+            "xdr.dll",
+            "zlib1.dll",
+        });
 
+        // Stage DLLs from project-local ThirdParty folder (packaging-safe)
+        AddRuntimeDependencyIfExists(NetCDFBin, "netcdf.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "hdf.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "hdf5.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "hdf5_hl.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "hdf5_tools.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "jpeg.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "libcurl.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "mfhdf.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "xdr.dll");
+        AddRuntimeDependencyIfExists(NetCDFBin, "zlib1.dll");
+    }
 
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "concrt140.dll"));
-        PublicDelayLoadDLLs.Add("concrt140.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "hdf.dll"));
-        PublicDelayLoadDLLs.Add("hdf.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "hdf5.dll"));
-        PublicDelayLoadDLLs.Add("hdf5.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "hdf5_hl.dll"));
-        PublicDelayLoadDLLs.Add("hdf5_hl.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "hdf5_tools.dll"));
-        PublicDelayLoadDLLs.Add("hdf5_tools.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "jpeg.dll"));
-        PublicDelayLoadDLLs.Add("jpeg.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "libcurl.dll"));
-        PublicDelayLoadDLLs.Add("libcurl.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "mfhdf.dll"));
-        PublicDelayLoadDLLs.Add("mfhdf.dll");
-
-        //RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "msvcp140.dll"));
-        //PublicDelayLoadDLLs.Add("msvcp140.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "netcdf.dll"));
-        PublicDelayLoadDLLs.Add("netcdf.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "vcruntime140.dll"));
-        PublicDelayLoadDLLs.Add("vcruntime140.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "xdr.dll"));
-        PublicDelayLoadDLLs.Add("xdr.dll");
-
-        RuntimeDependencies.Add(Path.Combine(ModuleDirectory, "C:\\Users\\Braden\\Documents\\Unreal Projects\\WaveMaker\\Binaries\\Win64", "zlib1.dll"));
-        PublicDelayLoadDLLs.Add("zlib1.dll");
+    private void AddRuntimeDependencyIfExists(string directory, string fileName)
+    {
+        string fullPath = Path.Combine(directory, fileName);
+        if (File.Exists(fullPath))
+        {
+            // For UE 5.1, this is enough to stage the file for packaging as well.
+            RuntimeDependencies.Add(fullPath);
+        }
     }
 }

@@ -52,7 +52,7 @@ struct FRow
 public:
 
 	UPROPERTY(BlueprintReadWrite)
-		float timeMinutes;
+		float timeMinutes = 0.0f;
 
 	UPROPERTY(BlueprintReadWrite)
 		TArray<FString> stringData;

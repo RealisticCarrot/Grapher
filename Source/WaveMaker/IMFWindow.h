@@ -50,6 +50,11 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TMap<int, FLineChain> graphLines;
 
+	// Stores line segments with gaps for invalid data (9999.99, etc.)
+	// Each call to GetDrawPointsByColumn also populates this array
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		TArray<FLineChain> currentColumnSegments;
+
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TArray<FLineChain> arcTanGraph;
 
@@ -70,6 +75,11 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 		TArray<FVector2D> GetDrawPointsByColumn(int col);
+
+	// Returns line segments with breaks at invalid values (9999.99, NaN, etc.)
+	// Use this instead of GetDrawPointsByColumn to handle data gaps properly
+	UFUNCTION(BlueprintCallable)
+		TArray<FLineChain> GetDrawSegmentsByColumn(int col);
 
 	UFUNCTION(BlueprintCallable)
 		void GetWindowCornersOnScreen(FVector2D &bottomLeft, FVector2D &topRight, bool scaled = true);

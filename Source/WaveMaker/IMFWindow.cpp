@@ -57,8 +57,6 @@ void AIMFWindow::BeginPlay()
 		
 		startTime = minTime;
 		endTime = maxTime;
-		
-		UE_LOG(LogTemp, Log, TEXT("IMF Data loaded: %d rows, time range: %.1f - %.1f minutes"), imfData.Num(), startTime, endTime);
 	}
 	else
 	{
@@ -111,6 +109,10 @@ TArray<FVector2D> AIMFWindow::GetDrawPointsByColumn(int col) {
 		return outData;
 	}
 
+	// Also populate currentColumnSegments with properly segmented data for gap handling
+	currentColumnSegments.Empty();
+	FLineChain currentSegment;
+	bool inValidSegment = false;
 
 	for (int i = 0; i < imfData.Num(); i++) {
 
@@ -124,25 +126,53 @@ TArray<FVector2D> AIMFWindow::GetDrawPointsByColumn(int col) {
 			
 			float dataValue = imfData[i].data[col];
 			
-			// Skip invalid placeholder values
-			if (dataValue > 90000.0f || dataValue < -90000.0f)
+			// Check for invalid placeholder values (exact common placeholders, NaN, etc.)
+			// Only filter EXACT placeholder values, not ranges, to avoid filtering real data
+			bool isPlaceholder = FMath::IsNearlyEqual(dataValue, 999.9f, 0.1f) ||
+								 FMath::IsNearlyEqual(dataValue, 999.99f, 0.01f) ||
+								 FMath::IsNearlyEqual(dataValue, 9999.9f, 0.1f) ||
+								 FMath::IsNearlyEqual(dataValue, 9999.99f, 0.01f) ||
+								 FMath::IsNearlyEqual(dataValue, 99999.9f, 0.1f) ||
+								 FMath::IsNearlyEqual(dataValue, 99999.99f, 0.01f) ||
+								 FMath::IsNearlyEqual(dataValue, -999.9f, 0.1f) ||
+								 FMath::IsNearlyEqual(dataValue, -999.99f, 0.01f) ||
+								 FMath::IsNearlyEqual(dataValue, -9999.9f, 0.1f) ||
+								 FMath::IsNearlyEqual(dataValue, -9999.99f, 0.01f);
+			
+			bool isInvalid = FMath::IsNaN(dataValue) || 
+							 !FMath::IsFinite(dataValue) || 
+							 isPlaceholder;
+			
+			if (isInvalid)
 			{
+				// End current segment if we were building one
+				if (inValidSegment && currentSegment.points.Num() > 0)
+				{
+					currentColumnSegments.Add(currentSegment);
+					currentSegment.points.Empty();
+					inValidSegment = false;
+				}
 				continue;
 			}
 
+			// Calculate the screen position for this valid data point
 			temp.X = bottomLeft.X + (((imfData[i].timeMinutes - startTime) / timeRange) * (topRight.X - bottomLeft.X));
 			temp.Y = topRight.Y + (((dataValue - graphScaleMax) / scaleRange) * (bottomLeft.Y - topRight.Y));
-
 			
-			
+			// Add to both the legacy single array and the segmented data
 			outData.Add(temp);
-
+			currentSegment.points.Add(temp);
+			inValidSegment = true;
 		}
-
-
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("GetDrawPointsByColumn(%d): Generated %d points"), col, outData.Num());
+	// Don't forget the last segment
+	if (currentSegment.points.Num() > 0)
+	{
+		currentColumnSegments.Add(currentSegment);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("GetDrawPointsByColumn(%d): Generated %d points in %d segments"), col, outData.Num(), currentColumnSegments.Num());
 
 	/*
 	FLineChain chain;
@@ -156,6 +186,112 @@ TArray<FVector2D> AIMFWindow::GetDrawPointsByColumn(int col) {
 	return outData;
 }
 
+
+TArray<FLineChain> AIMFWindow::GetDrawSegmentsByColumn(int col) {
+
+	TArray<FLineChain> segments;
+
+	// Safety check for empty data
+	if (imfData.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GetDrawSegmentsByColumn: No data loaded"));
+		return segments;
+	}
+	
+	// Safety check for column index
+	if (col < 0 || imfData[0].data.Num() <= col)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GetDrawSegmentsByColumn: Invalid column %d (data has %d columns)"), col, imfData[0].data.Num());
+		return segments;
+	}
+
+	FVector2D bottomLeft;
+	FVector2D topRight;
+	GetWindowCornersOnScreen(bottomLeft, topRight);
+	
+	// Prevent division by zero
+	float timeRange = endTime - startTime;
+	float scaleRange = graphScaleMin - graphScaleMax;
+	
+	if (FMath::IsNearlyZero(timeRange) || FMath::IsNearlyZero(scaleRange))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GetDrawSegmentsByColumn: Invalid time or scale range"));
+		return segments;
+	}
+
+	FLineChain currentSegment;
+	bool inValidSegment = false;
+
+	for (int i = 0; i < imfData.Num(); i++) {
+
+		// Check if this row has enough columns
+		if (imfData[i].data.Num() <= col)
+		{
+			// End current segment if we were in one
+			if (inValidSegment && currentSegment.points.Num() > 0)
+			{
+				segments.Add(currentSegment);
+				currentSegment.points.Empty();
+				inValidSegment = false;
+			}
+			continue;
+		}
+
+		// Check if within time range
+		if (imfData[i].timeMinutes < startTime || imfData[i].timeMinutes > endTime)
+		{
+			continue;
+		}
+
+		float dataValue = imfData[i].data[col];
+		
+		// Check for invalid values (exact common placeholders, NaN, infinity, etc.)
+		bool isPlaceholder = FMath::IsNearlyEqual(dataValue, 999.9f, 0.1f) ||
+							 FMath::IsNearlyEqual(dataValue, 999.99f, 0.01f) ||
+							 FMath::IsNearlyEqual(dataValue, 9999.9f, 0.1f) ||
+							 FMath::IsNearlyEqual(dataValue, 9999.99f, 0.01f) ||
+							 FMath::IsNearlyEqual(dataValue, 99999.9f, 0.1f) ||
+							 FMath::IsNearlyEqual(dataValue, 99999.99f, 0.01f) ||
+							 FMath::IsNearlyEqual(dataValue, -999.9f, 0.1f) ||
+							 FMath::IsNearlyEqual(dataValue, -999.99f, 0.01f) ||
+							 FMath::IsNearlyEqual(dataValue, -9999.9f, 0.1f) ||
+							 FMath::IsNearlyEqual(dataValue, -9999.99f, 0.01f);
+		bool isInvalidValue = FMath::IsNaN(dataValue) || 
+							  !FMath::IsFinite(dataValue) || 
+							  isPlaceholder;
+
+		if (isInvalidValue)
+		{
+			// End current segment - this creates the break/gap
+			if (inValidSegment && currentSegment.points.Num() > 0)
+			{
+				segments.Add(currentSegment);
+				currentSegment.points.Empty();
+				inValidSegment = false;
+			}
+			// Don't add this point - leave a gap
+			continue;
+		}
+
+		// Valid data point - add to current segment
+		FVector2D point;
+		point.X = bottomLeft.X + (((imfData[i].timeMinutes - startTime) / timeRange) * (topRight.X - bottomLeft.X));
+		point.Y = topRight.Y + (((dataValue - graphScaleMax) / scaleRange) * (bottomLeft.Y - topRight.Y));
+
+		currentSegment.points.Add(point);
+		inValidSegment = true;
+	}
+
+	// Don't forget the last segment
+	if (currentSegment.points.Num() > 0)
+	{
+		segments.Add(currentSegment);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("GetDrawSegmentsByColumn(%d): Generated %d segments"), col, segments.Num());
+
+	return segments;
+}
 
 
 TArray<FLineChain> AIMFWindow::GetDrawPointsForArcTan(int colX, int colY) {

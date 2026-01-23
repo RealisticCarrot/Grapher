@@ -288,6 +288,34 @@ void AViewer::loadFile() {
 				
 			}
 
+			// Fix time calculation to account for day and year changes
+			// Column 0 = Year, Column 1 = Day-of-year, Column 2 = Hour, Column 3 = Minute
+			if (imfData.Num() > 0 && imfData[0].data.Num() > 3)
+			{
+				float baseYear = imfData[0].data[0]; // First year in the file
+				float baseDay = imfData[0].data[1];  // First day in the file
+				
+				for (int i = 0; i < imfData.Num(); i++)
+				{
+					if (imfData[i].data.Num() > 3)
+					{
+						float currentYear = imfData[i].data[0];
+						float currentDay = imfData[i].data[1];
+						float hour = imfData[i].data[2];
+						float minute = imfData[i].data[3];
+						
+						// Calculate year offset in days (using 365 days per year)
+						float yearOffsetDays = (currentYear - baseYear) * 365.0f;
+						// Calculate day offset
+						float dayOffset = currentDay - baseDay;
+						// Total offset in days from the start of the file
+						float totalDayOffset = yearOffsetDays + dayOffset;
+						
+						// Convert to minutes: (days * 1440) + (hours * 60) + minutes
+						imfData[i].timeMinutes = (totalDayOffset * 1440.0f) + (hour * 60.0f) + minute;
+					}
+				}
+			}
 
 			imfWindow = GetWorld()->SpawnActor<AIMFWindow>(imfWindowClass);
 
@@ -363,57 +391,79 @@ FRow AViewer::GetRow(FString inStr) {
 
 float AViewer::AverageColumn(int col, FString startTime, FString endTime) {
 
+	// Check if we have data
+	if (imfData.Num() == 0) {
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, "No rows");
+		return 0.0f;
+	}
+	
+	// Check if column index is valid
+	if (col < 0 || imfData[0].data.Num() <= col) {
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, FString::Printf(TEXT("Invalid column: %d"), col));
+		return 0.0f;
+	}
+
 	FString hoursStr;
 	FString minutesStr;
 
 	startTime.Split(":", &hoursStr, &minutesStr);
-
 	float startMins = (FCString::Atof(*hoursStr) * 60.0f) + FCString::Atof(*minutesStr);
 
-
-
 	endTime.Split(":", &hoursStr, &minutesStr);
-
 	float endMins = (FCString::Atof(*hoursStr) * 60.0f) + FCString::Atof(*minutesStr);
 
-
-	float sum = 0.0f;
-	bool startAdding = false;
-	int n = 0;
-	if (imfData.Num() > 0) {
-		for (FRow row : imfData) {
-			
-
-			if (row.timeMinutes == startMins) {
-
-				startAdding = true;
-				sum += row.data[col];
-				n++;
-
-			}
-			else if (row.timeMinutes == endMins) {
-
-				
-
-				startAdding = false;
-
-				
-
-			}
-			else if (startAdding) {
-				sum += row.data[col];
-				n++;
-			}
-
-		}
-	}
-	else {
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, "No rows");
+	// Validate time range
+	if (startMins > endMins) {
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Start time must be before end time"));
 		return 0.0f;
 	}
 
+	float sum = 0.0f;
+	int n = 0;
+	
+	for (const FRow& row : imfData) {
+		// Check if this row's time is within the range (inclusive)
+		if (row.timeMinutes >= startMins && row.timeMinutes <= endMins) {
+			// Check if this row has enough columns
+			if (row.data.Num() > col) {
+				float value = row.data[col];
+				
+				// Skip invalid values (NaN, infinity, or exact placeholder values)
+				bool isPlaceholder = FMath::IsNearlyEqual(value, 999.9f, 0.1f) ||
+									 FMath::IsNearlyEqual(value, 999.99f, 0.01f) ||
+									 FMath::IsNearlyEqual(value, 9999.9f, 0.1f) ||
+									 FMath::IsNearlyEqual(value, 9999.99f, 0.01f) ||
+									 FMath::IsNearlyEqual(value, 99999.9f, 0.1f) ||
+									 FMath::IsNearlyEqual(value, 99999.99f, 0.01f) ||
+									 FMath::IsNearlyEqual(value, -999.9f, 0.1f) ||
+									 FMath::IsNearlyEqual(value, -999.99f, 0.01f) ||
+									 FMath::IsNearlyEqual(value, -9999.9f, 0.1f) ||
+									 FMath::IsNearlyEqual(value, -9999.99f, 0.01f);
+				if (FMath::IsNaN(value) || !FMath::IsFinite(value) || isPlaceholder) {
+					continue;
+				}
+				
+				sum += value;
+				n++;
+			}
+		}
+	}
 
-	return sum / (float)n;
+	// Prevent division by zero - return 0 if no valid data points found
+	if (n == 0) {
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("No valid data points in range"));
+		return 0.0f;
+	}
+
+	float result = sum / (float)n;
+	
+	// Final safety check - ensure result is valid
+	if (FMath::IsNaN(result) || !FMath::IsFinite(result)) {
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Calculation resulted in invalid value"));
+		return 0.0f;
+	}
+
+	return result;
 
 	
 

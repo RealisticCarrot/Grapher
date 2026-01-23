@@ -18,7 +18,8 @@ public class WaveMaker : ModuleRules
             "HeadMountedDisplay",
             "SlateCore",
             "Slate",
-            "UMG"
+            "UMG",
+            "HTTP"  // Added for HTTP/curl support
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -46,29 +47,30 @@ public class WaveMaker : ModuleRules
         PublicDefinitions.Add("WITH_NetCDFLib=1");
         PublicIncludePaths.Add(NetCDFInclude);
 
-        // Link libraries
-        PublicAdditionalLibraries.AddRange(new string[]
+        // Only add netCDF library dependencies if the lib folder exists and has files
+        if (Directory.Exists(NetCDFLib))
         {
-            Path.Combine(NetCDFLib, "netcdf.lib"),
-            Path.Combine(NetCDFLib, "hdf.lib"),
-            Path.Combine(NetCDFLib, "hdf5.lib"),
-            Path.Combine(NetCDFLib, "hdf5_hl.lib"),
-            Path.Combine(NetCDFLib, "hdf5_tools.lib"),
-            Path.Combine(NetCDFLib, "jpeg.lib"),
-            Path.Combine(NetCDFLib, "libcurl_imp.lib"),
-            Path.Combine(NetCDFLib, "libhdf.lib"),
-            Path.Combine(NetCDFLib, "libhdf5.lib"),
-            Path.Combine(NetCDFLib, "libhdf5_hl.lib"),
-            Path.Combine(NetCDFLib, "libhdf5_tools.lib"),
-            Path.Combine(NetCDFLib, "libmfhdf.lib"),
-            Path.Combine(NetCDFLib, "libxdr.lib"),
-            Path.Combine(NetCDFLib, "mfhdf.lib"),
-            Path.Combine(NetCDFLib, "xdr.lib"),
-            Path.Combine(NetCDFLib, "zlib.lib"),
-            Path.Combine(NetCDFLib, "zlibstatic.lib"),
-        });
+            // Link libraries (only add if they exist)
+            AddLibraryIfExists(NetCDFLib, "netcdf.lib");
+            AddLibraryIfExists(NetCDFLib, "hdf.lib");
+            AddLibraryIfExists(NetCDFLib, "hdf5.lib");
+            AddLibraryIfExists(NetCDFLib, "hdf5_hl.lib");
+            AddLibraryIfExists(NetCDFLib, "hdf5_tools.lib");
+            AddLibraryIfExists(NetCDFLib, "jpeg.lib");
+            AddLibraryIfExists(NetCDFLib, "libcurl_imp.lib");
+            AddLibraryIfExists(NetCDFLib, "libhdf.lib");
+            AddLibraryIfExists(NetCDFLib, "libhdf5.lib");
+            AddLibraryIfExists(NetCDFLib, "libhdf5_hl.lib");
+            AddLibraryIfExists(NetCDFLib, "libhdf5_tools.lib");
+            AddLibraryIfExists(NetCDFLib, "libmfhdf.lib");
+            AddLibraryIfExists(NetCDFLib, "libxdr.lib");
+            AddLibraryIfExists(NetCDFLib, "mfhdf.lib");
+            AddLibraryIfExists(NetCDFLib, "xdr.lib");
+            AddLibraryIfExists(NetCDFLib, "zlib.lib");
+            AddLibraryIfExists(NetCDFLib, "zlibstatic.lib");
+        }
 
-        // Delay-load DLLs
+        // Delay-load DLLs (netCDF related)
         PublicDelayLoadDLLs.AddRange(new string[]
         {
             "netcdf.dll",
@@ -77,32 +79,45 @@ public class WaveMaker : ModuleRules
             "hdf5_hl.dll",
             "hdf5_tools.dll",
             "jpeg.dll",
-            "libcurl.dll",
             "mfhdf.dll",
             "xdr.dll",
             "zlib1.dll",
         });
 
-        // Stage DLLs from project-local ThirdParty folder (packaging-safe)
-        AddRuntimeDependencyIfExists(NetCDFBin, "netcdf.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "hdf.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "hdf5.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "hdf5_hl.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "hdf5_tools.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "jpeg.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "libcurl.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "mfhdf.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "xdr.dll");
-        AddRuntimeDependencyIfExists(NetCDFBin, "zlib1.dll");
+        // Stage DLLs from project-local ThirdParty folder to the executable directory (packaging-safe)
+        if (Directory.Exists(NetCDFBin))
+        {
+            // Copy DLLs to the same folder as the executable using $(BinaryOutputDir)
+            AddRuntimeDependencyToBinaries(NetCDFBin, "netcdf.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf5.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf5_hl.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf5_tools.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "jpeg.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "libcurl.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "mfhdf.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "xdr.dll");
+            AddRuntimeDependencyToBinaries(NetCDFBin, "zlib1.dll");
+        }
     }
 
-    private void AddRuntimeDependencyIfExists(string directory, string fileName)
+    private void AddLibraryIfExists(string directory, string fileName)
     {
         string fullPath = Path.Combine(directory, fileName);
         if (File.Exists(fullPath))
         {
-            // For UE 5.1, this is enough to stage the file for packaging as well.
-            RuntimeDependencies.Add(fullPath);
+            PublicAdditionalLibraries.Add(fullPath);
+        }
+    }
+
+    // Copies a DLL to the same folder as the executable (BinaryOutputDir)
+    private void AddRuntimeDependencyToBinaries(string sourceDirectory, string fileName)
+    {
+        string sourcePath = Path.Combine(sourceDirectory, fileName);
+        if (File.Exists(sourcePath))
+        {
+            // $(BinaryOutputDir) is the folder where the .exe is placed
+            RuntimeDependencies.Add("$(BinaryOutputDir)/" + fileName, sourcePath);
         }
     }
 }

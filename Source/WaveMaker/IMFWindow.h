@@ -8,7 +8,6 @@
 
 struct FRow;
 
-
 USTRUCT(BlueprintType)
 struct FLineChain {
 	GENERATED_BODY()
@@ -61,6 +60,14 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TArray<int> arcTanKeys;
 
+	// Storage for custom equation graphs - maps key to equation string
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		TMap<int, FString> equationGraphs;
+
+	// Stored line chains for equation graphs (for rendering)
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		TMap<int, FLineChain> equationGraphLines;
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -86,5 +93,38 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 		TArray<FLineChain> GetDrawPointsForArcTan(int colX, int colY);
+
+	// Evaluates a custom equation and plots the result vs time
+	// Syntax: Col1, Col2, etc. for column references; +, -, *, / for operations; parentheses for grouping
+	// Constants: Pi, E (Euler's number)
+	// Trig: Sin(x), Cos(x), Tan(x), Arctan(x), Atan(x), Atan2(y,x)
+	// Math: Sqrt(x), Abs(x), Pow(x,y), Exp(x), Log(x), Ln(x), Log10(x), Log2(x)
+	// Rounding: Floor(x), Ceil(x), Round(x)
+	// Comparison: Min(a,b), Max(a,b), Clamp(value,min,max)
+	// Supports scientific notation: 1.5e-3, 2E+10
+	// Examples: "Pow(Col1, 2) + Pow(Col2, 2)", "Atan2(Col3, Col2)", "Sin(Pi * Col1)"
+	UFUNCTION(BlueprintCallable)
+		TArray<FLineChain> GetDrawPointsForEquation(const FString& equation);
+
+	// Adds an equation graph and stores it for later refresh
+	// Returns the key assigned to this graph
+	UFUNCTION(BlueprintCallable)
+		int AddEquationGraph(const FString& equation);
+
+	// Removes an equation graph by key
+	UFUNCTION(BlueprintCallable)
+		void RemoveEquationGraph(int key);
+
+	// Recalculates all stored equation graphs (call when axis range changes)
+	UFUNCTION(BlueprintCallable)
+		void RefreshEquationGraphs();
+
+	// Gets the current line chains for a specific equation graph
+	UFUNCTION(BlueprintCallable)
+		TArray<FLineChain> GetEquationGraphLines(int key);
+
+	// Converts minutes to HH:MM format string (e.g., 310 -> "05:10")
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		static FString MinutesToTimeString(float minutes);
 
 };

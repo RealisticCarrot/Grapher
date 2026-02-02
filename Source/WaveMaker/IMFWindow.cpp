@@ -1114,7 +1114,14 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForEquation(const FString& equation)
 		outData.Add(currentLineChain);
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("GetDrawPointsForEquation('%s'): Generated %d segments"), *equation, outData.Num());
+	// Log detailed info about generated segments
+	int totalPoints = 0;
+	for (int i = 0; i < outData.Num(); i++)
+	{
+		totalPoints += outData[i].points.Num();
+		UE_LOG(LogTemp, Log, TEXT("GetDrawPointsForEquation('%s'): Segment %d has %d points"), *equation, i, outData[i].points.Num());
+	}
+	UE_LOG(LogTemp, Log, TEXT("GetDrawPointsForEquation('%s'): Generated %d segments with %d total points"), *equation, outData.Num(), totalPoints);
 	
 	return outData;
 }
@@ -1162,9 +1169,18 @@ int AIMFWindow::AddEquationGraph(const FString& equation)
 			}
 		}
 		equationGraphLines.Add(key, combined);
+		
+		// Also add each line chain segment to graphLines for immediate rendering
+		// Use key * 1000 + chainIndex to match Blueprint's "Add Equation Lines" key scheme
+		for (int i = 0; i < chains.Num(); i++)
+		{
+			int graphLineKey = key * 1000 + i;
+			graphLines.Add(graphLineKey, chains[i]);
+		}
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("AddEquationGraph: Added equation '%s' with key %d"), *equation, key);
+	UE_LOG(LogTemp, Log, TEXT("AddEquationGraph: Added equation '%s' with key %d, added %d segments to graphLines"), *equation, key, chains.Num());
+	UE_LOG(LogTemp, Log, TEXT("AddEquationGraph: graphLines now has %d entries"), graphLines.Num());
 	
 	return key;
 }
@@ -1175,7 +1191,24 @@ void AIMFWindow::RemoveEquationGraph(int key)
 	{
 		equationGraphs.Remove(key);
 		equationGraphLines.Remove(key);
-		UE_LOG(LogTemp, Log, TEXT("RemoveEquationGraph: Removed graph with key %d"), key);
+		
+		// Also remove the corresponding graphLines entries
+		// Keys are in the range [key * 1000, key * 1000 + 999]
+		int baseKey = key * 1000;
+		TArray<int> keysToRemove;
+		for (auto& pair : graphLines)
+		{
+			if (pair.Key >= baseKey && pair.Key < baseKey + 1000)
+			{
+				keysToRemove.Add(pair.Key);
+			}
+		}
+		for (int k : keysToRemove)
+		{
+			graphLines.Remove(k);
+		}
+		
+		UE_LOG(LogTemp, Log, TEXT("RemoveEquationGraph: Removed graph with key %d (%d graphLine entries)"), key, keysToRemove.Num());
 	}
 }
 
@@ -1188,6 +1221,21 @@ void AIMFWindow::RefreshEquationGraphs()
 	{
 		int key = pair.Key;
 		const FString& equation = pair.Value;
+		
+		// First, remove old graphLines entries for this equation
+		int baseKey = key * 1000;
+		TArray<int> keysToRemove;
+		for (auto& glPair : graphLines)
+		{
+			if (glPair.Key >= baseKey && glPair.Key < baseKey + 1000)
+			{
+				keysToRemove.Add(glPair.Key);
+			}
+		}
+		for (int k : keysToRemove)
+		{
+			graphLines.Remove(k);
+		}
 		
 		TArray<FLineChain> chains = GetDrawPointsForEquation(equation);
 		
@@ -1202,6 +1250,13 @@ void AIMFWindow::RefreshEquationGraphs()
 				}
 			}
 			equationGraphLines.Add(key, combined);
+			
+			// Also update graphLines for rendering
+			for (int i = 0; i < chains.Num(); i++)
+			{
+				int graphLineKey = key * 1000 + i;
+				graphLines.Add(graphLineKey, chains[i]);
+			}
 		}
 		else
 		{
@@ -1245,4 +1300,48 @@ void AIMFWindow::GetWindowCornersOnScreen(FVector2D &bottomLeft, FVector2D &topR
 	}
 	
 
+}
+
+void AIMFWindow::DebugLogGraphLines()
+{
+	UE_LOG(LogTemp, Log, TEXT("=== DEBUG: graphLines state ==="));
+	UE_LOG(LogTemp, Log, TEXT("graphLines has %d entries:"), graphLines.Num());
+	
+	for (auto& pair : graphLines)
+	{
+		UE_LOG(LogTemp, Log, TEXT("  Key %d: %d points, Color: R=%d G=%d B=%d"), 
+			pair.Key, 
+			pair.Value.points.Num(),
+			pair.Value.color.R,
+			pair.Value.color.G,
+			pair.Value.color.B);
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("equationGraphs has %d entries:"), equationGraphs.Num());
+	for (auto& pair : equationGraphs)
+	{
+		UE_LOG(LogTemp, Log, TEXT("  Key %d: '%s'"), pair.Key, *pair.Value);
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("=== END DEBUG ==="));
+}
+
+int AIMFWindow::AddLineChainsToGraphLines(const TArray<FLineChain>& chains, int baseKey)
+{
+	int addedCount = 0;
+	
+	for (int i = 0; i < chains.Num(); i++)
+	{
+		int graphLineKey = baseKey + i;
+		graphLines.Add(graphLineKey, chains[i]);
+		addedCount++;
+		
+		UE_LOG(LogTemp, Log, TEXT("AddLineChainsToGraphLines: Added key %d with %d points"), 
+			graphLineKey, chains[i].points.Num());
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("AddLineChainsToGraphLines: Added %d chains starting at key %d, graphLines now has %d entries"), 
+		addedCount, baseKey, graphLines.Num());
+	
+	return addedCount;
 }

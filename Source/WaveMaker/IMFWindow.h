@@ -127,4 +127,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 		static FString MinutesToTimeString(float minutes);
 
+	// Debug function: logs the current state of graphLines
+	UFUNCTION(BlueprintCallable)
+		void DebugLogGraphLines();
+
+	// Helper: Directly adds equation line chains to graphLines for immediate rendering
+	// Call this after getting draw points to ensure lines appear immediately
+	// Returns the number of segments added
+	UFUNCTION(BlueprintCallable)
+		int AddLineChainsToGraphLines(const TArray<FLineChain>& chains, int baseKey);
+
 };

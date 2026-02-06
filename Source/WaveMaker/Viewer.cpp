@@ -7,6 +7,8 @@
 
 #include "MSPTimeline.h"
 
+#include "MSPLegend.h"
+
 
 //for file selection
 #include "C:\\Program Files\\Epic Games\\UE_5.1\\Engine\\Source\\Developer\\DesktopPlatform\\Public\\IDesktopPlatform.h"
@@ -45,8 +47,6 @@ AViewer::AViewer()
 
 	//mspWindow = LoadObject<AActor>(nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/MSPWindowBP.MSPWindowBP'"));
 
-	//camera = CreateDefaultSubobject<UCameraComponent>("Camera");
-
 	hittingTimeline = false;
 
 	mspSizeInterp = 0.0f;
@@ -60,12 +60,6 @@ AViewer::AViewer()
 void AViewer::BeginPlay()
 {
 	Super::BeginPlay();
-	
-	//camera->ProjectionMode = ECameraProjectionMode::Orthographic;
-	//camera->OrthoWidth = 1000.0f;
-	//camera->AspectRatio = 1.0f;
-
-	//camera->SetRelativeLocation(FVector::ZeroVector);
 	
 	Cast<APlayerController>(GetController())->bEnableMouseOverEvents = true;
 
@@ -111,8 +105,6 @@ void AViewer::Tick(float DeltaTime)
 		SetActorRotation(FVector(0.0f, 0.0f, 0.0f).ToOrientationRotator());
 	}
 
-
-	//camera->SetWorldLocation(GetActorLocation());
 	GetController()->SetControlRotation(GetActorRotation());
 
 	
@@ -226,7 +218,28 @@ void AViewer::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 
 void AViewer::loadFile() {
 
-	void* viewportHandle = GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetOSWindowHandle();
+	// Safety check for GEngine and viewport
+	if (!GEngine || !GEngine->GameViewport)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadFile: GEngine or GameViewport is null"));
+		return;
+	}
+	
+	TSharedPtr<SWindow> Window = GEngine->GameViewport->GetWindow();
+	if (!Window.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadFile: Window is not valid"));
+		return;
+	}
+	
+	TSharedPtr<FGenericWindow> NativeWindow = Window->GetNativeWindow();
+	if (!NativeWindow.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadFile: NativeWindow is not valid"));
+		return;
+	}
+
+	void* viewportHandle = NativeWindow->GetOSWindowHandle();
 
 	TArray<FString> outName;
 	
@@ -235,6 +248,12 @@ void AViewer::loadFile() {
 	//module.StartupModule();
 
 	IDesktopPlatform* deskPlatform = FDesktopPlatformModule::Get();//module.Get();
+	
+	if (!deskPlatform)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadFile: Could not get desktop platform"));
+		return;
+	}
 
 	deskPlatform->OpenFileDialog(viewportHandle, "Open Data File", "|:/", "file.txt", "MSP Data|*.LY;*.ly|Text Files|*.txt;*.lst", 0, outName);
 
@@ -243,25 +262,93 @@ void AViewer::loadFile() {
 		FString outNamePref;
 		const FString splitter = ".";
 		outName[0].Split(splitter, &outNamePref, &outNameType, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
-
 		
+		// Convert extension to lowercase for easier comparison
+		outNameType = outNameType.ToLower();
+		
+		// ========== CHECK FOR SUPPORTED FORMAT FIRST ==========
+		// Only proceed if format is supported, otherwise show error and return
+		bool isSupportedFormat = (outNameType == "ly" || outNameType == "txt" || outNameType == "lst");
+		
+		if (!isSupportedFormat) {
+			// Unsupported file format - show message and return WITHOUT resetting anything
+			UE_LOG(LogTemp, Warning, TEXT("LoadFile: Unsupported file format: .%s"), *outNameType);
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange, FString::Printf(TEXT("Unsupported file format: .%s\nSupported formats: .ly, .lst, .txt"), *outNameType));
+			return;
+		}
+		// ======================================================
+		
+		// ========== RESET ALL WINDOWS BEFORE LOADING NEW FILE ==========
+		// Call Blueprint event FIRST so it can clear any cached references
+		OnBeforeReset();
+		
+		// IMPORTANT: Clear arrays FIRST before destroying, so Blueprint sees empty arrays
+		// and doesn't try to access destroyed actors
+		
+		// Store references to destroy, then clear the public-facing arrays immediately
+		AIMFWindow* imfWindowToDestroy = imfWindow;
+		imfWindow = nullptr;
+		
+		TArray<AMSPWindow*> mspWindowsToDestroy = windows.mspWindows;
+		windows.mspWindows.Empty();
+		
+		TArray<AMSPMarker2*> markersToDestroy = mspMarkers;
+		mspMarkers.Empty();
+		
+		// Clear IMF data
+		imfData.Empty();
+		
+		// Now safely destroy the stored actors (arrays are already cleared)
+		if (imfWindowToDestroy != nullptr && IsValid(imfWindowToDestroy)) {
+			imfWindowToDestroy->Destroy();
+		}
+		
+		for (AMSPWindow* mspWin : mspWindowsToDestroy) {
+			if (mspWin && IsValid(mspWin)) {
+				// Destroy the timeline display
+				if (mspWin->timelineDisplay && IsValid(mspWin->timelineDisplay)) {
+					mspWin->timelineDisplay->Destroy();
+				}
+				// Destroy the legend display (Y-axis labels)
+				if (mspWin->legendDisplay && IsValid(mspWin->legendDisplay)) {
+					mspWin->legendDisplay->Destroy();
+				}
+				mspWin->Destroy();
+			}
+		}
+		
+		for (AMSPMarker2* marker : markersToDestroy) {
+			if (marker && IsValid(marker)) {
+				marker->DestroySelfAndWidgets();
+			}
+		}
+		// ================================================================
 
-		if (outNameType == (FString)"ly" || outNameType == (FString)"LY") {
+		if (outNameType == "ly") {
 			//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, "MSP Data File Targeted");
 
 			FActorSpawnParameters params;
 			//params.Template = mspWindow;
 			
-			//for now get rid of already created msp windows, in the future multiple windows will be allowed
-			if (windows.mspWindows.Num() > 0) {
-				windows.mspWindows.Last()->timelineDisplay->Destroy();
-				windows.mspWindows.Last()->Destroy();
-				windows.mspWindows.Empty();
+			// Check if MSP window class is set
+			if (!mspWindowClass)
+			{
+				UE_LOG(LogTemp, Error, TEXT("LoadFile: MSP Window Class is not set in Blueprint"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("MSP Window Class is not configured"));
+				return;
 			}
-			
 
-			windows.mspWindows.Add(GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 0.0f), (GetActorUpVector()).ToOrientationRotator(), params));
-			windows.mspWindows.Last()->loadFileAfterConstruction(outName[0]);
+			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 0.0f), (GetActorUpVector()).ToOrientationRotator(), params);
+			if (newWindow)
+			{
+				windows.mspWindows.Add(newWindow);
+				newWindow->loadFileAfterConstruction(outName[0]);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to spawn MSP window"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Failed to create MSP window"));
+			}
 			
 			
 
@@ -271,11 +358,39 @@ void AViewer::loadFile() {
 		}
 
 
-		if (outNameType == (FString)"txt" || outNameType == (FString)"lst") {
+		else if (outNameType == "txt" || outNameType == "lst") {
+			
 			TArray<FString> dataText;
-			FFileHelper::LoadFileToStringArray(dataText, *outName[0]);
+			if (!FFileHelper::LoadFileToStringArray(dataText, *outName[0]))
+			{
+				UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to load file: %s"), *outName[0]);
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, FString::Printf(TEXT("Failed to load file: %s"), *outName[0]));
+				return;
+			}
+			
+			// Check if file is empty
+			if (dataText.Num() == 0)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("LoadFile: File is empty: %s"), *outName[0]);
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("File is empty"));
+				return;
+			}
 
-			for (int i = 0; i < dataText.Num(); i++) {
+			// Determine file format based on extension
+			bool isTxtFormat = (outNameType.ToLower() == "txt");
+			
+			if (isTxtFormat) {
+				currentFileFormat = EDataFileFormat::TXT;
+				dataColumnOffset = 6;  // TXT: Year Month Day Hour Min Sec [data...]
+			} else {
+				currentFileFormat = EDataFileFormat::LST;
+				dataColumnOffset = 4;  // LST: Year DayOfYear Hour Min [data...]
+			}
+
+			// Starting index - skip header row for TXT files
+			int startIndex = isTxtFormat ? 1 : 0;
+
+			for (int i = startIndex; i < dataText.Num(); i++) {
 				FString leftStr;
 				FString rightStr;
 
@@ -284,103 +399,110 @@ void AViewer::loadFile() {
 				//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, "Left:" + leftStr + "|Right:" + rightStr);
 				
 				imfData.Add(GetRow(dataText[i]));
-
-				
 			}
 
-			// Fix time calculation to account for day and year changes
-			// Column 0 = Year, Column 1 = Day-of-year, Column 2 = Hour, Column 3 = Minute
-			if (imfData.Num() > 0 && imfData[0].data.Num() > 3)
+			// Calculate time based on file format
+			if (imfData.Num() > 0)
 			{
-				float baseYear = imfData[0].data[0]; // First year in the file
-				float baseDay = imfData[0].data[1];  // First day in the file
-				
-				for (int i = 0; i < imfData.Num(); i++)
-				{
-					if (imfData[i].data.Num() > 3)
+				if (isTxtFormat) {
+					// TXT format: Year Month Day Hour Minute Second
+					// Columns: 0=Year, 1=Month, 2=Day, 3=Hour, 4=Minute, 5=Second
+					if (imfData[0].data.Num() > 5)
 					{
-						float currentYear = imfData[i].data[0];
-						float currentDay = imfData[i].data[1];
-						float hour = imfData[i].data[2];
-						float minute = imfData[i].data[3];
+						float baseYear = imfData[0].data[0];
+						float baseMonth = imfData[0].data[1];
+						float baseDay = imfData[0].data[2];
 						
-						// Calculate year offset in days (using 365 days per year)
-						float yearOffsetDays = (currentYear - baseYear) * 365.0f;
-						// Calculate day offset
-						float dayOffset = currentDay - baseDay;
-						// Total offset in days from the start of the file
-						float totalDayOffset = yearOffsetDays + dayOffset;
+						for (int i = 0; i < imfData.Num(); i++)
+						{
+							if (imfData[i].data.Num() > 5)
+							{
+								float currentYear = imfData[i].data[0];
+								float currentMonth = imfData[i].data[1];
+								float currentDay = imfData[i].data[2];
+								float hour = imfData[i].data[3];
+								float minute = imfData[i].data[4];
+								float second = imfData[i].data[5];
+								
+								// Calculate approximate day offset (using 30 days per month average)
+								float yearOffsetDays = (currentYear - baseYear) * 365.0f;
+								float monthOffsetDays = (currentMonth - baseMonth) * 30.0f;
+								float dayOffset = currentDay - baseDay;
+								float totalDayOffset = yearOffsetDays + monthOffsetDays + dayOffset;
+								
+								// Convert to minutes: (days * 1440) + (hours * 60) + minutes + (seconds / 60)
+								imfData[i].timeMinutes = (totalDayOffset * 1440.0f) + (hour * 60.0f) + minute + (second / 60.0f);
+							}
+						}
+					}
+				}
+				else {
+					// LST format: Year DayOfYear Hour Minute
+					// Columns: 0=Year, 1=DayOfYear, 2=Hour, 3=Minute
+					if (imfData[0].data.Num() > 3)
+					{
+						float baseYear = imfData[0].data[0];
+						float baseDay = imfData[0].data[1];
 						
-						// Convert to minutes: (days * 1440) + (hours * 60) + minutes
-						imfData[i].timeMinutes = (totalDayOffset * 1440.0f) + (hour * 60.0f) + minute;
+						for (int i = 0; i < imfData.Num(); i++)
+						{
+							if (imfData[i].data.Num() > 3)
+							{
+								float currentYear = imfData[i].data[0];
+								float currentDay = imfData[i].data[1];
+								float hour = imfData[i].data[2];
+								float minute = imfData[i].data[3];
+								
+								// Calculate year offset in days (using 365 days per year)
+								float yearOffsetDays = (currentYear - baseYear) * 365.0f;
+								float dayOffset = currentDay - baseDay;
+								float totalDayOffset = yearOffsetDays + dayOffset;
+								
+								// Convert to minutes: (days * 1440) + (hours * 60) + minutes
+								imfData[i].timeMinutes = (totalDayOffset * 1440.0f) + (hour * 60.0f) + minute;
+							}
+						}
 					}
 				}
 			}
 
-			imfWindow = GetWorld()->SpawnActor<AIMFWindow>(imfWindowClass);
-
-
+			// Spawn the IMF window if the class is set
+			if (imfWindowClass)
+			{
+				imfWindow = GetWorld()->SpawnActor<AIMFWindow>(imfWindowClass);
+				if (!imfWindow)
+				{
+					UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to spawn IMF window"));
+					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Failed to create graph window"));
+				}
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("LoadFile: IMF Window Class is not set in Blueprint"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("IMF Window Class is not configured"));
+			}
 		}
-		
-
-
-
-		//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Black, outName[0]);
-
-		/*
-		for (int i = 0; i < dataText.Num(); i++) {
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Black, dataText[i]);
-
-		}
-		*/
 	}
 }
 
 
 
 FRow AViewer::GetRow(FString inStr) {
-
-
-	
-
-
 	FRow outRow;
 
-	FString leftStr = inStr.ConvertTabsToSpaces(3) + " ";
-	FString rightStr;
-
-	FString extractedValue;
-	/*
-	int n = 0;
-	while (leftStr.Len() > 0 && n < 100) {
-
-		
-		leftStr.Split(" ", &extractedValue, &rightStr);
-
-		outRow.stringData.Add(extractedValue);
-		outRow.data.Add(FCString::Atof(*extractedValue));
-		
-
-		leftStr = rightStr;
-
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, leftStr);
-		UE_LOG(LogTemp, Warning, TEXT("Left String: %s"), *extractedValue);
-
-		n++;
-
-	}
-	*/
-
-	
 	inStr.ParseIntoArray(outRow.stringData, TEXT(" "), true);
 
 	for (FString dataS : outRow.stringData) {
 		outRow.data.Add(FCString::Atof(*dataS));
-		//UE_LOG(LogTemp, Warning, TEXT("Left String: %f"), FCString::Atof(*dataS));
 	}
 
-
-	outRow.timeMinutes = (outRow.data[2] * 60.0f) + outRow.data[3];
+	// Safely calculate timeMinutes only if we have enough data columns
+	if (outRow.data.Num() >= 4) {
+		outRow.timeMinutes = (outRow.data[2] * 60.0f) + outRow.data[3];
+	} else {
+		outRow.timeMinutes = 0.0f;
+		UE_LOG(LogTemp, Warning, TEXT("GetRow: Not enough data columns (got %d, expected at least 4)"), outRow.data.Num());
+	}
 
 	return outRow;
 
@@ -389,84 +511,88 @@ FRow AViewer::GetRow(FString inStr) {
 }
 
 
-float AViewer::AverageColumn(int col, FString startTime, FString endTime) {
-
+float AViewer::AverageColumn(const FString& equation, const FString& startTime, const FString& endTime, FString& outErrorMessage)
+{
+	outErrorMessage = TEXT("");
+	
 	// Check if we have data
 	if (imfData.Num() == 0) {
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, "No rows");
+		outErrorMessage = TEXT("No data loaded");
 		return 0.0f;
 	}
 	
-	// Check if column index is valid
-	if (col < 0 || imfData[0].data.Num() <= col) {
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, FString::Printf(TEXT("Invalid column: %d"), col));
+	// Check if equation is empty
+	if (equation.IsEmpty()) {
+		outErrorMessage = TEXT("Equation is empty");
 		return 0.0f;
 	}
-
-	FString hoursStr;
-	FString minutesStr;
-
-	startTime.Split(":", &hoursStr, &minutesStr);
-	float startMins = (FCString::Atof(*hoursStr) * 60.0f) + FCString::Atof(*minutesStr);
-
-	endTime.Split(":", &hoursStr, &minutesStr);
-	float endMins = (FCString::Atof(*hoursStr) * 60.0f) + FCString::Atof(*minutesStr);
-
+	
+	// Parse start time using TimeStringToMinutes
+	float startMins = 0.0f;
+	FString startTimeError;
+	if (!AIMFWindow::TimeStringToMinutes(startTime, startMins, startTimeError)) {
+		outErrorMessage = FString::Printf(TEXT("Invalid start time: %s"), *startTimeError);
+		return 0.0f;
+	}
+	
+	// Parse end time using TimeStringToMinutes
+	float endMins = 0.0f;
+	FString endTimeError;
+	if (!AIMFWindow::TimeStringToMinutes(endTime, endMins, endTimeError)) {
+		outErrorMessage = FString::Printf(TEXT("Invalid end time: %s"), *endTimeError);
+		return 0.0f;
+	}
+	
 	// Validate time range
 	if (startMins > endMins) {
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Start time must be before end time"));
+		outErrorMessage = TEXT("Start time must be before end time");
 		return 0.0f;
 	}
-
+	
 	float sum = 0.0f;
-	int n = 0;
+	int validCount = 0;
+	int errorCount = 0;
+	FString lastError;
 	
 	for (const FRow& row : imfData) {
 		// Check if this row's time is within the range (inclusive)
 		if (row.timeMinutes >= startMins && row.timeMinutes <= endMins) {
-			// Check if this row has enough columns
-			if (row.data.Num() > col) {
-				float value = row.data[col];
-				
-				// Skip invalid values (NaN, infinity, or exact placeholder values)
-				bool isPlaceholder = FMath::IsNearlyEqual(value, 999.9f, 0.1f) ||
-									 FMath::IsNearlyEqual(value, 999.99f, 0.01f) ||
-									 FMath::IsNearlyEqual(value, 9999.9f, 0.1f) ||
-									 FMath::IsNearlyEqual(value, 9999.99f, 0.01f) ||
-									 FMath::IsNearlyEqual(value, 99999.9f, 0.1f) ||
-									 FMath::IsNearlyEqual(value, 99999.99f, 0.01f) ||
-									 FMath::IsNearlyEqual(value, -999.9f, 0.1f) ||
-									 FMath::IsNearlyEqual(value, -999.99f, 0.01f) ||
-									 FMath::IsNearlyEqual(value, -9999.9f, 0.1f) ||
-									 FMath::IsNearlyEqual(value, -9999.99f, 0.01f);
-				if (FMath::IsNaN(value) || !FMath::IsFinite(value) || isPlaceholder) {
-					continue;
-				}
-				
+			// Evaluate the equation for this row
+			bool bSuccess = false;
+			FString evalError;
+			float value = AIMFWindow::EvaluateEquationForRow(equation, row.data, bSuccess, evalError);
+			
+			if (bSuccess) {
 				sum += value;
-				n++;
+				validCount++;
+			}
+			else {
+				errorCount++;
+				lastError = evalError;
 			}
 		}
 	}
-
-	// Prevent division by zero - return 0 if no valid data points found
-	if (n == 0) {
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("No valid data points in range"));
+	
+	// Check if we got any valid data points
+	if (validCount == 0) {
+		if (errorCount > 0) {
+			outErrorMessage = FString::Printf(TEXT("No valid data points. Last error: %s"), *lastError);
+		}
+		else {
+			outErrorMessage = TEXT("No data points found in time range");
+		}
 		return 0.0f;
 	}
-
-	float result = sum / (float)n;
 	
-	// Final safety check - ensure result is valid
+	float result = sum / (float)validCount;
+	
+	// Final safety check
 	if (FMath::IsNaN(result) || !FMath::IsFinite(result)) {
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Calculation resulted in invalid value"));
+		outErrorMessage = TEXT("Calculation resulted in invalid value");
 		return 0.0f;
 	}
-
-	return result;
-
 	
-
+	return result;
 }
 
 

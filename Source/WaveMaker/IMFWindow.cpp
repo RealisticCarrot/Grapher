@@ -33,8 +33,14 @@ void AIMFWindow::BeginPlay()
 {
 	Super::BeginPlay();
 	
-
-	imfData = Cast<AViewer>(GetWorld()->GetFirstPlayerController()->GetPawn())->imfData;
+	// Clear any leftover state from previous sessions
+	equationGraphs.Empty();
+	equationGraphLines.Empty();
+	displayedColumns.Empty();
+	
+	AViewer* viewer = Cast<AViewer>(GetWorld()->GetFirstPlayerController()->GetPawn());
+	imfData = viewer->imfData;
+	dataColumnOffset = viewer->dataColumnOffset;
 
 	// Auto-calculate startTime and endTime based on actual data
 	if (imfData.Num() > 0)
@@ -172,17 +178,6 @@ TArray<FVector2D> AIMFWindow::GetDrawPointsByColumn(int col) {
 		currentColumnSegments.Add(currentSegment);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("GetDrawPointsByColumn(%d): Generated %d points in %d segments"), col, outData.Num(), currentColumnSegments.Num());
-
-	/*
-	FLineChain chain;
-	chain.points = outData;
-	chain.color =  (UKismetMathLibrary::HSVToRGB(FMath::FRandRange(0.0, 360.0), .5f, 0.6f)).ToFColor(true);
-
-	graphLines.Add(chain);
-	*/
-
-
 	return outData;
 }
 
@@ -287,8 +282,6 @@ TArray<FLineChain> AIMFWindow::GetDrawSegmentsByColumn(int col) {
 	{
 		segments.Add(currentSegment);
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("GetDrawSegmentsByColumn(%d): Generated %d segments"), col, segments.Num());
 
 	return segments;
 }
@@ -405,9 +398,13 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForArcTan(int colX, int colY) {
 
 // ============================================================================
 // Expression Parser for custom equations
-// Supports: +, -, *, /, parentheses, Col# references
+// Supports: +, -, *, /, ^(power), parentheses, Col# references
 // Constants: Pi, E (Euler's number ~2.71828)
 // Scientific notation: 1.5e-3, 2E+10, 3e5
+// 
+// Column References (Col1 = first column, Col0 = error):
+//   LST files: Col1=Year, Col2=DayOfYear, Col3=Hour, Col4=Min, Col5+=Data
+//   TXT files: Col1=Year, Col2=Month, Col3=Day, Col4=Hour, Col5=Min, Col6=Sec, Col7+=Data
 // 
 // Functions:
 //   Trig:       Sin(x), Cos(x), Tan(x), Arctan(x), Atan(x), Atan2(y,x)
@@ -417,11 +414,12 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForArcTan(int colX, int colY) {
 //   Comparison: Min(a,b), Max(a,b), Clamp(value,min,max)
 // 
 // Examples:
-//   "Pow(Col1, 2) + Pow(Col2, 2)"     - sum of squares
-//   "Atan2(Col3, Col2)"               - angle from two components
-//   "Sin(Pi * Col1 / 180)"            - sine with degree conversion
-//   "Log10(Abs(Col1) + 1)"            - log scale with offset
-//   "Clamp(Col1, -10, 10)"            - bounded values
+//   "Col5^2 + Col6^2"                 - sum of squares for LST data (using ^ operator)
+//   "Pow(Col5, 2) + Pow(Col6, 2)"     - sum of squares (using Pow function)
+//   "Atan2(Col6, Col5)"               - angle from two components
+//   "Sin(Pi * Col5 / 180)"            - sine with degree conversion
+//   "Log10(Abs(Col5) + 1)"            - log scale with offset
+//   "Clamp(Col5, -10, 10)"            - bounded values
 // ============================================================================
 
 struct FExpressionParser
@@ -531,6 +529,8 @@ struct FExpressionParser
 	}
 	
 	// Try to parse "Col" followed by a number (case-insensitive)
+	// Col1 = raw index 0 (Year), Col2 = raw index 1, etc.
+	// Col0 returns an error
 	// Returns column index, or -1 if not a column reference
 	int32 TryParseColRef()
 	{
@@ -563,7 +563,18 @@ struct FExpressionParser
 		}
 		
 		FString NumStr = Expr.Mid(Start, Pos - Start);
-		return FCString::Atoi(*NumStr);
+		int32 UserColNum = FCString::Atoi(*NumStr);
+		
+		// Col0 is not allowed - columns start at 1
+		if (UserColNum < 1)
+		{
+			bHasError = true;
+			ErrorMsg = TEXT("Column numbers start at 1 (Col1 = first column)");
+			return -1;
+		}
+		
+		// Col1 = index 0, Col2 = index 1, etc.
+		return UserColNum - 1;
 	}
 	
 	// Try to match a function name (case-insensitive)
@@ -964,20 +975,42 @@ struct FExpressionParser
 		return ParsePrimary();
 	}
 	
-	float ParseTerm()
+	// Parse power/exponent operator (^) - higher precedence than * and /
+	float ParsePower()
 	{
 		float Left = ParseUnary();
 		
 		while (!bHasError)
 		{
 			SkipWhitespace();
+			if (Match('^'))
+			{
+				float Right = ParseUnary();
+				Left = FMath::Pow(Left, Right);
+			}
+			else
+			{
+				break;
+			}
+		}
+		
+		return Left;
+	}
+	
+	float ParseTerm()
+	{
+		float Left = ParsePower();
+		
+		while (!bHasError)
+		{
+			SkipWhitespace();
 			if (Match('*'))
 			{
-				Left *= ParseUnary();
+				Left *= ParsePower();
 			}
 			else if (Match('/'))
 			{
-				float Right = ParseUnary();
+				float Right = ParsePower();
 				if (FMath::IsNearlyZero(Right))
 				{
 					bHasError = true;
@@ -1114,15 +1147,6 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForEquation(const FString& equation)
 		outData.Add(currentLineChain);
 	}
 	
-	// Log detailed info about generated segments
-	int totalPoints = 0;
-	for (int i = 0; i < outData.Num(); i++)
-	{
-		totalPoints += outData[i].points.Num();
-		UE_LOG(LogTemp, Log, TEXT("GetDrawPointsForEquation('%s'): Segment %d has %d points"), *equation, i, outData[i].points.Num());
-	}
-	UE_LOG(LogTemp, Log, TEXT("GetDrawPointsForEquation('%s'): Generated %d segments with %d total points"), *equation, outData.Num(), totalPoints);
-	
 	return outData;
 }
 
@@ -1134,11 +1158,167 @@ FString AIMFWindow::MinutesToTimeString(float minutes) {
 	}
 	
 	int totalMinutes = FMath::RoundToInt(minutes);
-	int hours = totalMinutes / 60;
-	int mins = totalMinutes % 60;
+	int days = totalMinutes / (24 * 60);
+	int remainingMinutes = totalMinutes % (24 * 60);
+	int hours = remainingMinutes / 60;
+	int mins = remainingMinutes % 60;
 	
-	// Format as HH:MM (e.g., 05:10)
-	return FString::Printf(TEXT("%02d:%02d"), hours, mins);
+	// Format as DD:HH:MM if days > 0, otherwise HH:MM
+	if (days > 0) {
+		return FString::Printf(TEXT("%02d:%02d:%02d"), days, hours, mins);
+	}
+	else {
+		return FString::Printf(TEXT("%02d:%02d"), hours, mins);
+	}
+}
+
+bool AIMFWindow::TimeStringToMinutes(const FString& timeString, float& outMinutes, FString& outErrorMessage) {
+	outMinutes = 0.0f;
+	outErrorMessage = TEXT("");
+	
+	// Trim whitespace
+	FString trimmed = timeString.TrimStartAndEnd();
+	
+	if (trimmed.IsEmpty()) {
+		outErrorMessage = TEXT("Time string is empty");
+		return false;
+	}
+	
+	// Check for negative sign
+	bool isNegative = false;
+	if (trimmed.StartsWith(TEXT("-"))) {
+		isNegative = true;
+		trimmed = trimmed.RightChop(1);
+	}
+	
+	// Count colons to determine format
+	int colonCount = 0;
+	for (int i = 0; i < trimmed.Len(); i++) {
+		if (trimmed[i] == ':') {
+			colonCount++;
+		}
+	}
+	
+	if (colonCount == 2) {
+		// DD:HH:MM format (Day:Hour:Minute)
+		int32 firstColon, secondColon;
+		trimmed.FindChar(':', firstColon);
+		secondColon = trimmed.Find(TEXT(":"), ESearchCase::IgnoreCase, ESearchDir::FromStart, firstColon + 1);
+		
+		FString daysStr = trimmed.Left(firstColon);
+		FString hoursStr = trimmed.Mid(firstColon + 1, secondColon - firstColon - 1);
+		FString minsStr = trimmed.RightChop(secondColon + 1);
+		
+		// Validate all parts are numeric
+		if (daysStr.IsEmpty() || hoursStr.IsEmpty() || minsStr.IsEmpty()) {
+			outErrorMessage = TEXT("Invalid DD:HH:MM format - missing values");
+			return false;
+		}
+		
+		for (int i = 0; i < daysStr.Len(); i++) {
+			if (!FChar::IsDigit(daysStr[i])) {
+				outErrorMessage = TEXT("Invalid characters in days value");
+				return false;
+			}
+		}
+		for (int i = 0; i < hoursStr.Len(); i++) {
+			if (!FChar::IsDigit(hoursStr[i])) {
+				outErrorMessage = TEXT("Invalid characters in hours value");
+				return false;
+			}
+		}
+		for (int i = 0; i < minsStr.Len(); i++) {
+			if (!FChar::IsDigit(minsStr[i])) {
+				outErrorMessage = TEXT("Invalid characters in minutes value");
+				return false;
+			}
+		}
+		
+		int days = FCString::Atoi(*daysStr);
+		int hours = FCString::Atoi(*hoursStr);
+		int mins = FCString::Atoi(*minsStr);
+		
+		// Validate hours (0-23) and minutes (0-59) are in valid range
+		if (hours < 0 || hours > 23) {
+			outErrorMessage = FString::Printf(TEXT("Hours must be 0-23 (got %d)"), hours);
+			return false;
+		}
+		if (mins < 0 || mins > 59) {
+			outErrorMessage = FString::Printf(TEXT("Minutes must be 0-59 (got %d)"), mins);
+			return false;
+		}
+		
+		outMinutes = (float)(days * 24 * 60 + hours * 60 + mins);
+	}
+	else if (colonCount == 1) {
+		// HH:MM format (Hour:Minute)
+		int32 colonIndex;
+		trimmed.FindChar(':', colonIndex);
+		
+		FString hoursStr = trimmed.Left(colonIndex);
+		FString minsStr = trimmed.RightChop(colonIndex + 1);
+		
+		// Validate both parts are numeric
+		if (hoursStr.IsEmpty() || minsStr.IsEmpty()) {
+			outErrorMessage = TEXT("Invalid HH:MM format - missing values");
+			return false;
+		}
+		
+		for (int i = 0; i < hoursStr.Len(); i++) {
+			if (!FChar::IsDigit(hoursStr[i])) {
+				outErrorMessage = TEXT("Invalid characters in hours value");
+				return false;
+			}
+		}
+		for (int i = 0; i < minsStr.Len(); i++) {
+			if (!FChar::IsDigit(minsStr[i])) {
+				outErrorMessage = TEXT("Invalid characters in minutes value");
+				return false;
+			}
+		}
+		
+		int hours = FCString::Atoi(*hoursStr);
+		int mins = FCString::Atoi(*minsStr);
+		
+		// Validate minutes are in valid range (0-59)
+		if (mins < 0 || mins > 59) {
+			outErrorMessage = FString::Printf(TEXT("Minutes must be 0-59 (got %d)"), mins);
+			return false;
+		}
+		
+		outMinutes = (float)(hours * 60 + mins);
+	}
+	else if (colonCount == 0) {
+		// Try to parse as plain number (minutes)
+		// Check if it's a valid number (allow decimal point)
+		bool hasDecimal = false;
+		for (int i = 0; i < trimmed.Len(); i++) {
+			if (trimmed[i] == '.') {
+				if (hasDecimal) {
+					outErrorMessage = TEXT("Invalid number - multiple decimal points");
+					return false;
+				}
+				hasDecimal = true;
+			}
+			else if (!FChar::IsDigit(trimmed[i])) {
+				outErrorMessage = FString::Printf(TEXT("Invalid character '%c' in number"), trimmed[i]);
+				return false;
+			}
+		}
+		
+		outMinutes = FCString::Atof(*trimmed);
+	}
+	else {
+		// More than 2 colons is invalid
+		outErrorMessage = FString::Printf(TEXT("Invalid format - too many colons (%d)"), colonCount);
+		return false;
+	}
+	
+	if (isNegative) {
+		outMinutes = -outMinutes;
+	}
+	
+	return true;
 }
 
 
@@ -1179,9 +1359,6 @@ int AIMFWindow::AddEquationGraph(const FString& equation)
 		}
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("AddEquationGraph: Added equation '%s' with key %d, added %d segments to graphLines"), *equation, key, chains.Num());
-	UE_LOG(LogTemp, Log, TEXT("AddEquationGraph: graphLines now has %d entries"), graphLines.Num());
-	
 	return key;
 }
 
@@ -1208,14 +1385,11 @@ void AIMFWindow::RemoveEquationGraph(int key)
 			graphLines.Remove(k);
 		}
 		
-		UE_LOG(LogTemp, Log, TEXT("RemoveEquationGraph: Removed graph with key %d (%d graphLine entries)"), key, keysToRemove.Num());
 	}
 }
 
 void AIMFWindow::RefreshEquationGraphs()
 {
-	UE_LOG(LogTemp, Log, TEXT("RefreshEquationGraphs: Refreshing %d equation graphs"), equationGraphs.Num());
-	
 	// Recalculate all stored equation graphs
 	for (auto& pair : equationGraphs)
 	{
@@ -1279,6 +1453,173 @@ TArray<FLineChain> AIMFWindow::GetEquationGraphLines(int key)
 	return result;
 }
 
+bool AIMFWindow::IsValidEquation(const FString& equation, FString& outErrorMessage)
+{
+	outErrorMessage = TEXT("");
+	
+	// Check for empty equation
+	if (equation.IsEmpty())
+	{
+		outErrorMessage = TEXT("Equation is empty");
+		return false;
+	}
+	
+	// Check if we have data to validate column references
+	if (imfData.Num() == 0)
+	{
+		outErrorMessage = TEXT("No data loaded");
+		return false;
+	}
+	
+	// Create a test parser with the first row of data to validate the equation
+	FExpressionParser TestParser(equation, imfData[0].data);
+	float result = TestParser.Evaluate();
+	
+	// Check for parsing errors
+	if (TestParser.bHasError)
+	{
+		outErrorMessage = TestParser.ErrorMsg;
+		return false;
+	}
+	
+	// Check for invalid result (NaN, infinity)
+	if (FMath::IsNaN(result) || !FMath::IsFinite(result))
+	{
+		// This might happen if all values in the first row are placeholders
+		// So we should check a few more rows if available
+		bool foundValidResult = false;
+		for (int i = 1; i < FMath::Min(10, imfData.Num()); i++)
+		{
+			FExpressionParser RetryParser(equation, imfData[i].data);
+			float retryResult = RetryParser.Evaluate();
+			if (!RetryParser.bHasError && !FMath::IsNaN(retryResult) && FMath::IsFinite(retryResult))
+			{
+				foundValidResult = true;
+				break;
+			}
+		}
+		
+		if (!foundValidResult)
+		{
+			outErrorMessage = TEXT("Equation produces invalid results (check column references)");
+			return false;
+		}
+	}
+	
+	return true;
+}
+
+float AIMFWindow::EvaluateEquationForRow(const FString& equation, const TArray<float>& rowData, 
+	bool& bSuccess, FString& outErrorMessage)
+{
+	bSuccess = false;
+	outErrorMessage = TEXT("");
+	
+	if (equation.IsEmpty())
+	{
+		outErrorMessage = TEXT("Equation is empty");
+		return 0.0f;
+	}
+	
+	if (rowData.Num() == 0)
+	{
+		outErrorMessage = TEXT("Row data is empty");
+		return 0.0f;
+	}
+	
+	FExpressionParser Parser(equation, rowData);
+	float result = Parser.Evaluate();
+	
+	if (Parser.bHasError)
+	{
+		outErrorMessage = Parser.ErrorMsg;
+		return 0.0f;
+	}
+	
+	if (FMath::IsNaN(result) || !FMath::IsFinite(result))
+	{
+		outErrorMessage = TEXT("Result is not a valid number");
+		return 0.0f;
+	}
+	
+	bSuccess = true;
+	return result;
+}
+
+void AIMFWindow::RegisterEquationForHover(int key, const FString& equation, const TArray<FLineChain>& chains)
+{
+	// Check if already registered with same key - just update, don't duplicate
+	if (equationGraphs.Contains(key))
+	{
+		// Already registered, just update the equation string
+		equationGraphs[key] = equation;
+	}
+	else
+	{
+		// New registration
+		equationGraphs.Add(key, equation);
+	}
+	
+	// Combine all chains into one FLineChain for hover detection
+	// Add NaN separator between chains to mark segment boundaries
+	FLineChain combined;
+	bool firstChain = true;
+	for (const FLineChain& chain : chains)
+	{
+		if (chain.points.Num() == 0)
+		{
+			continue;
+		}
+		
+		// Add NaN separator before each chain (except the first)
+		if (!firstChain)
+		{
+			combined.points.Add(FVector2D(NAN, NAN));
+		}
+		firstChain = false;
+		
+		for (const FVector2D& point : chain.points)
+		{
+			combined.points.Add(point);
+		}
+		combined.color = chain.color; // Use the last chain's color
+	}
+	
+	if (combined.points.Num() > 0)
+	{
+		// Use assignment to update existing or add new (prevents duplicates)
+		equationGraphLines.FindOrAdd(key) = combined;
+	}
+}
+
+void AIMFWindow::UnregisterEquationFromHover(int key)
+{
+	equationGraphs.Remove(key);
+	equationGraphLines.Remove(key);
+}
+
+void AIMFWindow::ClearAllEquationRegistrations()
+{
+	equationGraphs.Empty();
+	equationGraphLines.Empty();
+}
+
+void AIMFWindow::DebugPrintEquationRegistrations()
+{
+	UE_LOG(LogTemp, Warning, TEXT("=== DEBUG: Equation Registrations ==="));
+	UE_LOG(LogTemp, Warning, TEXT("equationGraphs has %d entries:"), equationGraphs.Num());
+	for (const auto& pair : equationGraphs)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("  key=%d, equation=%s"), pair.Key, *pair.Value);
+	}
+	UE_LOG(LogTemp, Warning, TEXT("equationGraphLines has %d entries:"), equationGraphLines.Num());
+	for (const auto& pair : equationGraphLines)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("  key=%d, points=%d"), pair.Key, pair.Value.points.Num());
+	}
+	UE_LOG(LogTemp, Warning, TEXT("=== END DEBUG ==="));
+}
+
 
 void AIMFWindow::GetWindowCornersOnScreen(FVector2D &bottomLeft, FVector2D &topRight, bool scaled) {
 
@@ -1302,46 +1643,446 @@ void AIMFWindow::GetWindowCornersOnScreen(FVector2D &bottomLeft, FVector2D &topR
 
 }
 
-void AIMFWindow::DebugLogGraphLines()
+bool AIMFWindow::GetValueAtMousePosition(float& outTime, float& outValue, FString& outTimeString)
 {
-	UE_LOG(LogTemp, Log, TEXT("=== DEBUG: graphLines state ==="));
-	UE_LOG(LogTemp, Log, TEXT("graphLines has %d entries:"), graphLines.Num());
+	outTime = 0.0f;
+	outValue = 0.0f;
+	outTimeString = TEXT("");
 	
-	for (auto& pair : graphLines)
+	// Get the player controller
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (!PC)
 	{
-		UE_LOG(LogTemp, Log, TEXT("  Key %d: %d points, Color: R=%d G=%d B=%d"), 
-			pair.Key, 
-			pair.Value.points.Num(),
-			pair.Value.color.R,
-			pair.Value.color.G,
-			pair.Value.color.B);
+		return false;
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("equationGraphs has %d entries:"), equationGraphs.Num());
-	for (auto& pair : equationGraphs)
+	// Get mouse position
+	float MouseX, MouseY;
+	if (!PC->GetMousePosition(MouseX, MouseY))
 	{
-		UE_LOG(LogTemp, Log, TEXT("  Key %d: '%s'"), pair.Key, *pair.Value);
+		return false;
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("=== END DEBUG ==="));
+	// Get window corners on screen (unscaled - raw screen coordinates)
+	FVector2D bottomLeft, topRight;
+	GetWindowCornersOnScreen(bottomLeft, topRight, false);
+	
+	// Check if mouse is within the graph bounds
+	if (MouseX < bottomLeft.X || MouseX > topRight.X ||
+		MouseY < topRight.Y || MouseY > bottomLeft.Y)
+	{
+		return false;
+	}
+	
+	// Calculate normalized position (0-1) within the graph
+	float normalizedX = (MouseX - bottomLeft.X) / (topRight.X - bottomLeft.X);
+	float normalizedY = (MouseY - topRight.Y) / (bottomLeft.Y - topRight.Y);
+	
+	// Convert to actual time and value
+	// X-axis: time ranges from startTime to endTime
+	outTime = startTime + normalizedX * (endTime - startTime);
+	
+	// Y-axis: value ranges from graphScaleMax (top) to graphScaleMin (bottom)
+	outValue = graphScaleMax + normalizedY * (graphScaleMin - graphScaleMax);
+	
+	// Format time as string
+	outTimeString = MinutesToTimeString(outTime);
+	
+	return true;
 }
 
-int AIMFWindow::AddLineChainsToGraphLines(const TArray<FLineChain>& chains, int baseKey)
+bool AIMFWindow::GetClosestGraphAtMouse(float& outTime, FString& outTimeString, float& outGraphValue, 
+	FString& outGraphName, int& outGraphKey, bool& outIsEquation, FColor& outColor)
 {
-	int addedCount = 0;
+	// Initialize outputs
+	outTime = 0.0f;
+	outTimeString = TEXT("");
+	outGraphValue = 0.0f;
+	outGraphName = TEXT("");
+	outGraphKey = -1;
+	outIsEquation = false;
+	outColor = FColor::White;
 	
-	for (int i = 0; i < chains.Num(); i++)
+	// Get the player controller
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (!PC)
 	{
-		int graphLineKey = baseKey + i;
-		graphLines.Add(graphLineKey, chains[i]);
-		addedCount++;
-		
-		UE_LOG(LogTemp, Log, TEXT("AddLineChainsToGraphLines: Added key %d with %d points"), 
-			graphLineKey, chains[i].points.Num());
+		return false;
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("AddLineChainsToGraphLines: Added %d chains starting at key %d, graphLines now has %d entries"), 
-		addedCount, baseKey, graphLines.Num());
+	// Get mouse position (screen coordinates)
+	float MouseX, MouseY;
+	if (!PC->GetMousePosition(MouseX, MouseY))
+	{
+		return false;
+	}
 	
-	return addedCount;
+	// Get window corners on screen (unscaled - raw screen coordinates)
+	FVector2D bottomLeft, topRight;
+	GetWindowCornersOnScreen(bottomLeft, topRight, false);
+	
+	// Debug: Log mouse position and bounds occasionally
+	
+	// Check if mouse is within the graph bounds
+	if (MouseX < bottomLeft.X || MouseX > topRight.X ||
+		MouseY < topRight.Y || MouseY > bottomLeft.Y)
+	{
+		return false;
+	}
+	
+	// Calculate time at mouse position
+	float timeRange = endTime - startTime;
+	if (FMath::IsNearlyZero(timeRange))
+	{
+		return false;
+	}
+	
+	float normalizedX = (MouseX - bottomLeft.X) / (topRight.X - bottomLeft.X);
+	outTime = startTime + normalizedX * timeRange;
+	outTimeString = MinutesToTimeString(outTime);
+	
+	// Calculate value range and screen dimensions
+	float valueRange = graphScaleMin - graphScaleMax;
+	float graphHeight = bottomLeft.Y - topRight.Y;
+	float graphWidth = topRight.X - bottomLeft.X;
+	
+	if (FMath::IsNearlyZero(valueRange) || FMath::IsNearlyZero(graphHeight))
+	{
+		return false;
+	}
+	
+	// Track closest graph
+	float closestScreenDistance = FLT_MAX;
+	bool foundGraph = false;
+	
+	// Tolerance: 30 pixels
+	const float maxPixelDistance = 30.0f;
+	
+	// Helper to convert time to screen X
+	auto TimeToScreenX = [&](float time) -> float
+	{
+		return bottomLeft.X + ((time - startTime) / timeRange) * graphWidth;
+	};
+	
+	// Helper to convert data value to screen Y
+	auto ValueToScreenY = [&](float value) -> float
+	{
+		return topRight.Y + ((value - graphScaleMax) / valueRange) * graphHeight;
+	};
+	
+	// Helper to convert screen Y to data value
+	auto ScreenYToValue = [&](float screenY) -> float
+	{
+		float normalizedY = (screenY - topRight.Y) / graphHeight;
+		return graphScaleMax + normalizedY * valueRange;
+	};
+	
+	// Helper to calculate perpendicular distance from point to line segment
+	// Returns the distance and the closest point on the segment
+	auto DistanceToSegment = [](FVector2D point, FVector2D lineStart, FVector2D lineEnd, FVector2D& closestPoint) -> float
+	{
+		FVector2D line = lineEnd - lineStart;
+		float lineLength = line.Size();
+		
+		if (lineLength < 0.0001f)
+		{
+			closestPoint = lineStart;
+			return FVector2D::Distance(point, lineStart);
+		}
+		
+		// Project point onto the line, clamping to segment
+		float t = FMath::Clamp(FVector2D::DotProduct(point - lineStart, line) / (lineLength * lineLength), 0.0f, 1.0f);
+		closestPoint = lineStart + t * line;
+		
+		return FVector2D::Distance(point, closestPoint);
+	};
+	
+	FVector2D mousePos(MouseX, MouseY);
+	
+	// === Search through displayed columns by querying imfData directly ===
+	for (int col : displayedColumns)
+	{
+		// Search through all visible line segments for this column
+		for (int i = 0; i < imfData.Num() - 1; i++)
+		{
+			// Check if both points are within visible time range
+			float time1 = imfData[i].timeMinutes;
+			float time2 = imfData[i + 1].timeMinutes;
+			
+			// Skip if segment is completely outside visible range
+			if (time2 < startTime || time1 > endTime)
+			{
+				continue;
+			}
+			
+			// Check column bounds
+			if (col < 0 || col >= imfData[i].data.Num() || col >= imfData[i + 1].data.Num())
+			{
+				continue;
+			}
+			
+			float value1 = imfData[i].data[col];
+			float value2 = imfData[i + 1].data[col];
+			
+			// Skip invalid values
+			bool invalid1 = FMath::IsNaN(value1) || !FMath::IsFinite(value1) ||
+				FMath::IsNearlyEqual(value1, 9999.99f, 0.1f) || FMath::IsNearlyEqual(value1, 999.99f, 0.1f) ||
+				FMath::IsNearlyEqual(value1, -9999.99f, 0.1f) || FMath::IsNearlyEqual(value1, -999.99f, 0.1f);
+			bool invalid2 = FMath::IsNaN(value2) || !FMath::IsFinite(value2) ||
+				FMath::IsNearlyEqual(value2, 9999.99f, 0.1f) || FMath::IsNearlyEqual(value2, 999.99f, 0.1f) ||
+				FMath::IsNearlyEqual(value2, -9999.99f, 0.1f) || FMath::IsNearlyEqual(value2, -999.99f, 0.1f);
+			
+			if (invalid1 || invalid2)
+			{
+				continue;
+			}
+			
+			// Convert to screen coordinates
+			FVector2D screenPoint1(TimeToScreenX(time1), ValueToScreenY(value1));
+			FVector2D screenPoint2(TimeToScreenX(time2), ValueToScreenY(value2));
+			
+			// Calculate distance to this line segment
+			FVector2D closestPoint;
+			float distance = DistanceToSegment(mousePos, screenPoint1, screenPoint2, closestPoint);
+			
+			if (distance < closestScreenDistance && distance < maxPixelDistance)
+			{
+				closestScreenDistance = distance;
+				outGraphKey = col;
+				outIsEquation = false;
+				outGraphName = FString::Printf(TEXT("Col%d"), col + 1); // Display as 1-indexed
+				// Calculate the value at the closest point
+				float closestTime = startTime + ((closestPoint.X - bottomLeft.X) / graphWidth) * timeRange;
+				outTime = closestTime;
+				outTimeString = MinutesToTimeString(closestTime);
+				outGraphValue = ScreenYToValue(closestPoint.Y);
+				outColor = FColor::White;
+				foundGraph = true;
+			}
+		}
+	}
+	
+	// === Search through equation graphs ===
+	// Evaluate equations using the same coordinate system as the mouse position (unscaled)
+	for (auto& Pair : equationGraphs)
+	{
+		int eqKey = Pair.Key;
+		const FString& equation = Pair.Value;
+		
+		// Calculate equation values and convert to screen coordinates directly
+		// Using the same bottomLeft/topRight we got earlier (unscaled)
+		FVector2D prevPoint;
+		bool hasPrevPoint = false;
+		
+		for (int i = 0; i < imfData.Num(); i++)
+		{
+			// Skip if outside time range
+			if (imfData[i].timeMinutes < startTime || imfData[i].timeMinutes > endTime)
+			{
+				continue;
+			}
+			
+			// Evaluate the equation for this row
+			FExpressionParser Parser(equation, imfData[i].data);
+			float result = Parser.Evaluate();
+			
+			// Skip invalid results
+			if (Parser.bHasError || FMath::IsNaN(result) || !FMath::IsFinite(result))
+			{
+				hasPrevPoint = false;
+				continue;
+			}
+			
+			// Convert to screen coordinates (using unscaled bounds)
+			FVector2D currentPoint;
+			currentPoint.X = TimeToScreenX(imfData[i].timeMinutes);
+			currentPoint.Y = ValueToScreenY(result);
+			
+			// Check distance to segment from previous point to current point
+			if (hasPrevPoint)
+			{
+				FVector2D closestPoint;
+				float distance = DistanceToSegment(mousePos, prevPoint, currentPoint, closestPoint);
+				
+				if (distance < closestScreenDistance && distance < maxPixelDistance)
+				{
+					closestScreenDistance = distance;
+					outGraphKey = eqKey;
+					outIsEquation = true;
+					
+					// Get color from equationGraphLines if available
+					if (equationGraphLines.Contains(eqKey))
+					{
+						outColor = equationGraphLines[eqKey].color;
+					}
+					
+					// Calculate time and value at closest point
+					float closestTime = startTime + ((closestPoint.X - bottomLeft.X) / graphWidth) * timeRange;
+					outTime = closestTime;
+					outTimeString = MinutesToTimeString(closestTime);
+					outGraphValue = ScreenYToValue(closestPoint.Y);
+					foundGraph = true;
+					outGraphName = equation;
+				}
+			}
+			
+			prevPoint = currentPoint;
+			hasPrevPoint = true;
+		}
+	}
+	
+	if (foundGraph)
+	{
+		return true;
+	}
+	
+	// If no close graph found, clear outputs
+	outGraphKey = -1;
+	outGraphName = TEXT("");
+	outGraphValue = 0.0f;
+	return false;
+}
+
+// === Marker System Implementation ===
+
+bool AIMFWindow::AddMarkerAtMousePosition()
+{
+	float time, value;
+	FString timeString;
+	
+	if (!GetValueAtMousePosition(time, value, timeString))
+	{
+		return false;
+	}
+	
+	AddMarkerAtTime(time);
+	return true;
+}
+
+bool AIMFWindow::RemoveMarkerAtMousePosition()
+{
+	float time, value;
+	FString timeString;
+	
+	if (!GetValueAtMousePosition(time, value, timeString))
+	{
+		return false;
+	}
+	
+	// Calculate tolerance based on visible time range (about 2% of visible range)
+	float toleranceMinutes = (endTime - startTime) * 0.02f;
+	
+	return RemoveMarkerAtTime(time, toleranceMinutes);
+}
+
+void AIMFWindow::AddMarkerAtTime(float timeMinutes)
+{
+	// Check if marker already exists at this time (within small tolerance)
+	for (float existingTime : markerTimes)
+	{
+		if (FMath::Abs(existingTime - timeMinutes) < 0.1f)
+		{
+			return; // Marker already exists
+		}
+	}
+	
+	markerTimes.Add(timeMinutes);
+	markerTimes.Sort();
+}
+
+bool AIMFWindow::RemoveMarkerAtTime(float timeMinutes, float toleranceMinutes)
+{
+	if (markerTimes.Num() == 0)
+	{
+		return false;
+	}
+	
+	// Find the closest marker
+	int closestIndex = -1;
+	float closestDistance = FLT_MAX;
+	
+	for (int i = 0; i < markerTimes.Num(); i++)
+	{
+		float distance = FMath::Abs(markerTimes[i] - timeMinutes);
+		if (distance < closestDistance)
+		{
+			closestDistance = distance;
+			closestIndex = i;
+		}
+	}
+	
+	// Check if within tolerance
+	if (closestIndex >= 0 && closestDistance <= toleranceMinutes)
+	{
+		markerTimes.RemoveAt(closestIndex);
+		return true;
+	}
+	
+	return false;
+}
+
+void AIMFWindow::ClearAllMarkers()
+{
+	markerTimes.Empty();
+}
+
+TArray<float> AIMFWindow::GetMarkerScreenPositions()
+{
+	TArray<float> screenPositions;
+	
+	FVector2D bottomLeft, topRight;
+	GetWindowCornersOnScreen(bottomLeft, topRight, false);
+	
+	float graphWidth = topRight.X - bottomLeft.X;
+	float timeRange = endTime - startTime;
+	
+	if (timeRange <= 0)
+	{
+		return screenPositions;
+	}
+	
+	for (float markerTime : markerTimes)
+	{
+		// Only include markers within visible range
+		if (markerTime >= startTime && markerTime <= endTime)
+		{
+			float normalizedX = (markerTime - startTime) / timeRange;
+			float screenX = bottomLeft.X + normalizedX * graphWidth;
+			screenPositions.Add(screenX);
+		}
+	}
+	
+	return screenPositions;
+}
+
+TArray<FString> AIMFWindow::GetMarkerTimeStrings()
+{
+	TArray<FString> timeStrings;
+	
+	for (float markerTime : markerTimes)
+	{
+		timeStrings.Add(MinutesToTimeString(markerTime));
+	}
+	
+	return timeStrings;
+}
+
+// === Displayed Column Tracking ===
+
+void AIMFWindow::AddDisplayedColumn(int col)
+{
+	if (!displayedColumns.Contains(col))
+	{
+		displayedColumns.Add(col);
+	}
+}
+
+void AIMFWindow::RemoveDisplayedColumn(int col)
+{
+	displayedColumns.Remove(col);
+}
+
+void AIMFWindow::ClearDisplayedColumns()
+{
+	displayedColumns.Empty();
 }

@@ -46,6 +46,11 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		float endTime;
 
+	// Column offset where actual data starts (4 for LST format, 6 for TXT format)
+	// This is automatically set when loading the file
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		int dataColumnOffset = 4;
+
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TMap<int, FLineChain> graphLines;
 
@@ -54,12 +59,6 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TArray<FLineChain> currentColumnSegments;
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere)
-		TArray<FLineChain> arcTanGraph;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere)
-		TArray<int> arcTanKeys;
-
 	// Storage for custom equation graphs - maps key to equation string
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TMap<int, FString> equationGraphs;
@@ -67,6 +66,15 @@ public:
 	// Stored line chains for equation graphs (for rendering)
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TMap<int, FLineChain> equationGraphLines;
+
+	// Vertical marker lines (stores time positions in minutes)
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		TArray<float> markerTimes;
+
+	// Tracks which columns are currently being displayed (for mouse hover detection)
+	// Call AddDisplayedColumn/RemoveDisplayedColumn when toggling columns
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		TArray<int> displayedColumns;
 
 protected:
 	// Called when the game starts or when spawned
@@ -95,14 +103,16 @@ public:
 		TArray<FLineChain> GetDrawPointsForArcTan(int colX, int colY);
 
 	// Evaluates a custom equation and plots the result vs time
-	// Syntax: Col1, Col2, etc. for column references; +, -, *, / for operations; parentheses for grouping
+	// Syntax: Col1, Col2, etc. for column references (Col1 = first column, Col0 = error)
+	// For LST files: data starts at Col5. For TXT files: data starts at Col7.
+	// Operators: +, -, *, /, ^ (power); parentheses for grouping
 	// Constants: Pi, E (Euler's number)
 	// Trig: Sin(x), Cos(x), Tan(x), Arctan(x), Atan(x), Atan2(y,x)
 	// Math: Sqrt(x), Abs(x), Pow(x,y), Exp(x), Log(x), Ln(x), Log10(x), Log2(x)
 	// Rounding: Floor(x), Ceil(x), Round(x)
 	// Comparison: Min(a,b), Max(a,b), Clamp(value,min,max)
 	// Supports scientific notation: 1.5e-3, 2E+10
-	// Examples: "Pow(Col1, 2) + Pow(Col2, 2)", "Atan2(Col3, Col2)", "Sin(Pi * Col1)"
+	// Examples: "Col5^2 + Col6^2", "Atan2(Col6, Col5)", "Sin(Pi * Col5)"
 	UFUNCTION(BlueprintCallable)
 		TArray<FLineChain> GetDrawPointsForEquation(const FString& equation);
 
@@ -123,18 +133,121 @@ public:
 	UFUNCTION(BlueprintCallable)
 		TArray<FLineChain> GetEquationGraphLines(int key);
 
-	// Converts minutes to HH:MM format string (e.g., 310 -> "05:10")
+	// Validates an equation string and returns true if it's valid
+	// Also returns an error message if invalid
+	UFUNCTION(BlueprintCallable)
+		bool IsValidEquation(const FString& equation, FString& outErrorMessage);
+
+	// Registers an equation graph for hover detection
+	// Call this after GetDrawPointsForEquation if you want hover to detect the equation
+	// key: A unique identifier for this equation (you manage this)
+	// equation: The equation string (for display)
+	// chains: The line chains returned by GetDrawPointsForEquation
+	UFUNCTION(BlueprintCallable)
+		void RegisterEquationForHover(int key, const FString& equation, const TArray<FLineChain>& chains);
+
+	// Unregisters an equation graph from hover detection
+	UFUNCTION(BlueprintCallable)
+		void UnregisterEquationFromHover(int key);
+
+	// Clears ALL equation registrations (for debugging/reset)
+	UFUNCTION(BlueprintCallable)
+		void ClearAllEquationRegistrations();
+
+	// Debug: prints all currently registered equations to log
+	UFUNCTION(BlueprintCallable)
+		void DebugPrintEquationRegistrations();
+
+	// Evaluates an equation for a single row of data
+	// Returns the result, or 0 if evaluation failed
+	// bSuccess is set to true if evaluation succeeded, false otherwise
+	// outErrorMessage contains error description if evaluation failed
+	UFUNCTION(BlueprintCallable)
+		static float EvaluateEquationForRow(const FString& equation, const TArray<float>& rowData, 
+			bool& bSuccess, FString& outErrorMessage);
+
+	// Converts minutes to time string. Formats:
+	// - DD:HH:MM if days > 0 (e.g., 1563 -> "01:02:03" meaning Day 1, Hour 2, Min 3)
+	// - HH:MM if days = 0 (e.g., 123 -> "02:03" meaning Hour 2, Min 3)
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 		static FString MinutesToTimeString(float minutes);
 
-	// Debug function: logs the current state of graphLines
+	// Gets the graph coordinates (time and value) at the current mouse position
+	// Returns true if mouse is over the graph, false otherwise
+	// outTime: The time value (in minutes) at the mouse X position
+	// outValue: The Y-axis value at the mouse Y position
+	// outTimeString: The time formatted as DD:HH:MM or HH:MM string
 	UFUNCTION(BlueprintCallable)
-		void DebugLogGraphLines();
+		bool GetValueAtMousePosition(float& outTime, float& outValue, FString& outTimeString);
 
-	// Helper: Directly adds equation line chains to graphLines for immediate rendering
-	// Call this after getting draw points to ensure lines appear immediately
-	// Returns the number of segments added
+	// Gets detailed info about the closest graph line at mouse position
+	// Returns true if mouse is over the graph and a nearby line was found
+	// outTime: The time value (in minutes) at the mouse X position
+	// outTimeString: The time formatted as DD:HH:MM or HH:MM
+	// outGraphValue: The actual Y value from the closest graph line at this time
+	// outGraphName: Name of the graph ("Col5", "Col6", or equation like "Col5^2")
+	// outGraphKey: The key/column number of the closest graph (-1 if none found)
+	// outIsEquation: True if closest graph is a custom equation, false if column
+	// outColor: The color of the closest graph line
 	UFUNCTION(BlueprintCallable)
-		int AddLineChainsToGraphLines(const TArray<FLineChain>& chains, int baseKey);
+		bool GetClosestGraphAtMouse(float& outTime, FString& outTimeString, float& outGraphValue, 
+			FString& outGraphName, int& outGraphKey, bool& outIsEquation, FColor& outColor);
+
+	// Converts a time string to minutes. Accepts formats:
+	// - "DD:HH:MM" format (e.g., "01:02:03" -> Day 1, Hour 2, Min 3 -> 1563 minutes)
+	// - "HH:MM" format (e.g., "02:03" -> Hour 2, Min 3 -> 123 minutes)
+	// - Plain number (e.g., "80" -> 80 minutes)
+	// Returns true if parsing succeeded, false otherwise
+	// outErrorMessage contains the error description if parsing failed
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		static bool TimeStringToMinutes(const FString& timeString, float& outMinutes, FString& outErrorMessage);
+
+	// === Marker System ===
+
+	// Adds a vertical marker line at the specified time (from mouse position)
+	// Returns true if marker was added, false if mouse is not over graph
+	UFUNCTION(BlueprintCallable)
+		bool AddMarkerAtMousePosition();
+
+	// Removes the nearest vertical marker line to the current mouse position
+	// Returns true if a marker was removed, false if no markers nearby or mouse not over graph
+	UFUNCTION(BlueprintCallable)
+		bool RemoveMarkerAtMousePosition();
+
+	// Adds a marker at a specific time value
+	UFUNCTION(BlueprintCallable)
+		void AddMarkerAtTime(float timeMinutes);
+
+	// Removes a marker at a specific time value (with tolerance)
+	// Returns true if marker was found and removed
+	UFUNCTION(BlueprintCallable)
+		bool RemoveMarkerAtTime(float timeMinutes, float toleranceMinutes = 5.0f);
+
+	// Clears all markers
+	UFUNCTION(BlueprintCallable)
+		void ClearAllMarkers();
+
+	// Gets screen X positions for all markers (for rendering)
+	// Returns array of screen X coordinates for markers within visible range
+	UFUNCTION(BlueprintCallable)
+		TArray<float> GetMarkerScreenPositions();
+
+	// Gets marker info as formatted strings (for display)
+	UFUNCTION(BlueprintCallable)
+		TArray<FString> GetMarkerTimeStrings();
+
+	// === Displayed Column Tracking (for mouse hover) ===
+
+	// Call this when a column is selected/displayed
+	UFUNCTION(BlueprintCallable)
+		void AddDisplayedColumn(int col);
+
+	// Call this when a column is deselected/hidden
+	UFUNCTION(BlueprintCallable)
+		void RemoveDisplayedColumn(int col);
+
+	// Clears all displayed columns tracking
+	UFUNCTION(BlueprintCallable)
+		void ClearDisplayedColumns();
 
 };

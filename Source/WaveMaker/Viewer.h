@@ -44,6 +44,14 @@ public:
 
 };
 
+// Enum for different data file formats
+UENUM(BlueprintType)
+enum class EDataFileFormat : uint8
+{
+	LST,  // Year DayOfYear Hour Minute [data...] - data starts at column 4
+	TXT   // Year Month Day Hour Minute Second [data...] - data starts at column 6
+};
+
 USTRUCT(BlueprintType)
 struct FRow
 {
@@ -78,9 +86,6 @@ public:
 
 	UPROPERTY(BlueprintReadWrite)
 		FWindowManager windows;
-
-	//UPROPERTY()
-	//	UCameraComponent* camera;
 
 	UPROPERTY()
 		bool hittingTimeline;
@@ -133,6 +138,14 @@ public:
 	
 	UPROPERTY(BlueprintReadWrite)
 		TArray<FRow> imfData;
+
+	// Current data file format (LST or TXT)
+	UPROPERTY(BlueprintReadWrite)
+		EDataFileFormat currentFileFormat = EDataFileFormat::LST;
+
+	// Column offset where actual data starts (4 for LST, 6 for TXT)
+	UPROPERTY(BlueprintReadWrite)
+		int dataColumnOffset = 4;
 
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -206,13 +219,21 @@ public:
 	UFUNCTION(BlueprintCallable)
 		FRow GetRow(FString inStr);
 
+	// Averages the result of an equation over a time range
+	// equation: Can be a simple column reference like "Col4" or a full equation like "Col4+Col3/2"
+	// startTime/endTime: Time strings in DD:HH:MM, HH:MM, or plain minutes format
+	// Returns the average value, or 0 if no valid data points
+	// outErrorMessage: Contains error description if calculation failed
 	UFUNCTION(BlueprintCallable)
-		float AverageColumn(int col, FString startTime, FString endTime);
+		float AverageColumn(const FString& equation, const FString& startTime, const FString& endTime, FString& outErrorMessage);
 
 
 	UFUNCTION(BlueprintImplementableEvent)
 		void CreateIMFGraphWidgets();
 	
-	
+	// Called BEFORE resetting/destroying windows when loading a new file
+	// Implement this in Blueprint to clear any cached window references
+	UFUNCTION(BlueprintImplementableEvent)
+		void OnBeforeReset();
 
 };

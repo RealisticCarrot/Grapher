@@ -73,8 +73,8 @@ void AMSPLegend::UpdateLegendRange() {
 
 	rangeMin = fmaxf(rangeMin, 0.0f);
 
-	GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, FString::SanitizeFloat(rangeMax));
-	GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, FString::SanitizeFloat(rangeMin));
+	//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, FString::SanitizeFloat(rangeMax));
+	//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, FString::SanitizeFloat(rangeMin));
 
 
 

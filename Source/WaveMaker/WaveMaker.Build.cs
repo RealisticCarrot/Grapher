@@ -19,7 +19,9 @@ public class WaveMaker : ModuleRules
             "SlateCore",
             "Slate",
             "UMG",
-            "HTTP"  // Added for HTTP/curl support
+            "HTTP",  // Added for HTTP/curl support
+            "ImageCore",  // For FImageUtils
+            "ImageWrapper"  // For proper PNG export with alpha
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] { });

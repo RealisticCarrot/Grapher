@@ -1988,6 +1988,7 @@ void AIMFWindow::AddMarkerAtTime(float timeMinutes)
 	
 	markerTimes.Add(timeMinutes);
 	markerTimes.Sort();
+	RefreshMarkerGraphLines();
 }
 
 bool AIMFWindow::RemoveMarkerAtTime(float timeMinutes, float toleranceMinutes)
@@ -2015,6 +2016,7 @@ bool AIMFWindow::RemoveMarkerAtTime(float timeMinutes, float toleranceMinutes)
 	if (closestIndex >= 0 && closestDistance <= toleranceMinutes)
 	{
 		markerTimes.RemoveAt(closestIndex);
+		RefreshMarkerGraphLines();
 		return true;
 	}
 	
@@ -2024,6 +2026,141 @@ bool AIMFWindow::RemoveMarkerAtTime(float timeMinutes, float toleranceMinutes)
 void AIMFWindow::ClearAllMarkers()
 {
 	markerTimes.Empty();
+	RefreshMarkerGraphLines();
+}
+
+void AIMFWindow::RefreshMarkerGraphLines()
+{
+	// Remove old marker entries from graphLines (keys -10000 to -19999 only, not grid lines)
+	TArray<int> keysToRemove;
+	for (auto& pair : graphLines)
+	{
+		if (pair.Key <= -10000 && pair.Key > -20000)
+		{
+			keysToRemove.Add(pair.Key);
+		}
+	}
+	for (int k : keysToRemove)
+	{
+		graphLines.Remove(k);
+	}
+	
+	// Get current screen-space graph bounds (scaled, matching GetDrawPointsByColumn)
+	FVector2D bottomLeft, topRight;
+	GetWindowCornersOnScreen(bottomLeft, topRight);
+	
+	float timeRange = endTime - startTime;
+	if (FMath::IsNearlyZero(timeRange))
+	{
+		return;
+	}
+	
+	// Add dashed vertical lines in graphLines for each marker
+	int keyCounter = 0;
+	const float dashLength = 8.0f;   // pixels per dash
+	const float gapLength = 6.0f;    // pixels per gap
+	const float stepSize = dashLength + gapLength;
+	
+	for (int i = 0; i < markerTimes.Num(); i++)
+	{
+		float markerTime = markerTimes[i];
+		
+		// Only include markers within visible range
+		if (markerTime >= startTime && markerTime <= endTime)
+		{
+			float normalizedX = (markerTime - startTime) / timeRange;
+			float screenX = bottomLeft.X + normalizedX * (topRight.X - bottomLeft.X);
+			
+			float lineTop = topRight.Y;
+			float lineBottom = bottomLeft.Y;
+			
+			// Create individual dash segments
+			for (float y = lineTop; y < lineBottom; y += stepSize)
+			{
+				float dashEnd = FMath::Min(y + dashLength, lineBottom);
+				
+				FLineChain dashSegment;
+				dashSegment.points.Add(FVector2D(screenX, y));
+				dashSegment.points.Add(FVector2D(screenX, dashEnd));
+				dashSegment.color = FColor::Black;
+				
+				graphLines.Add(-10000 - keyCounter, dashSegment);
+				keyCounter++;
+			}
+		}
+	}
+}
+
+void AIMFWindow::RefreshGridLines()
+{
+	// Remove old grid entries from graphLines (keys <= -20000 and > -30000)
+	TArray<int> keysToRemove;
+	for (auto& pair : graphLines)
+	{
+		if (pair.Key <= -20000 && pair.Key > -30000)
+		{
+			keysToRemove.Add(pair.Key);
+		}
+	}
+	for (int k : keysToRemove)
+	{
+		graphLines.Remove(k);
+	}
+
+	if (!bShowGridLines)
+	{
+		return;
+	}
+
+	// Get current screen-space graph bounds
+	FVector2D bottomLeft, topRight;
+	GetWindowCornersOnScreen(bottomLeft, topRight);
+
+	float timeRange = endTime - startTime;
+	float scaleRange = graphScaleMin - graphScaleMax;
+
+	if (FMath::IsNearlyZero(timeRange) || FMath::IsNearlyZero(scaleRange))
+	{
+		return;
+	}
+
+	int keyCounter = 0;
+
+	// Horizontal grid lines (matching Y-axis ticks)
+	if (gridHorizontalDivisions > 0)
+	{
+		for (int i = 0; i <= gridHorizontalDivisions; i++)
+		{
+			float normalizedY = (float)i / (float)gridHorizontalDivisions;
+			float screenY = topRight.Y + normalizedY * (bottomLeft.Y - topRight.Y);
+
+			FLineChain gridLine;
+			gridLine.points.Add(FVector2D(bottomLeft.X, screenY));
+			gridLine.points.Add(FVector2D(topRight.X, screenY));
+			gridLine.color = gridLineColor;
+
+			graphLines.Add(-20000 - keyCounter, gridLine);
+			keyCounter++;
+		}
+	}
+
+	// Vertical grid lines (matching X-axis ticks)
+	if (gridVerticalDivisions > 0)
+	{
+		for (int i = 0; i <= gridVerticalDivisions; i++)
+		{
+			float normalizedX = (float)i / (float)gridVerticalDivisions;
+			float screenX = bottomLeft.X + normalizedX * (topRight.X - bottomLeft.X);
+
+			FLineChain gridLine;
+			gridLine.points.Add(FVector2D(screenX, topRight.Y));
+			gridLine.points.Add(FVector2D(screenX, bottomLeft.Y));
+			gridLine.color = gridLineColor;
+
+			graphLines.Add(-20000 - keyCounter, gridLine);
+			keyCounter++;
+		}
+	}
 }
 
 TArray<float> AIMFWindow::GetMarkerScreenPositions()

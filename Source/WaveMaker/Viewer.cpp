@@ -38,6 +38,12 @@
 
 #include "IMFWindow.h"
 
+#include "ImageUtils.h"
+#include "Misc/FileHelper.h"
+#include "UnrealClient.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+
 
 // Sets default values
 AViewer::AViewer()
@@ -188,6 +194,15 @@ void AViewer::Tick(float DeltaTime)
 	if (windows.mspWindows.Num() > 0) {
 		
 		windows.mspWindows[0]->timeLoc = mspTimeLoc;
+
+		// Forward time range from slider to MSP window
+		if (mspTimeSpanUnit > 0.0f) {
+			windows.mspWindows[0]->timeSpanUnit = mspTimeSpanUnit;
+		}
+		// Sync auto-computed value back to slider after file load
+		else if (windows.mspWindows[0]->timeSpanUnit > 0.0f) {
+			mspTimeSpanUnit = windows.mspWindows[0]->timeSpanUnit;
+		}
 	}
 
 	
@@ -338,7 +353,7 @@ void AViewer::loadFile() {
 				return;
 			}
 
-			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 0.0f), (GetActorUpVector()).ToOrientationRotator(), params);
+			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 30.0f), (GetActorUpVector()).ToOrientationRotator(), params);
 			if (newWindow)
 			{
 				windows.mspWindows.Add(newWindow);
@@ -485,7 +500,270 @@ void AViewer::loadFile() {
 	}
 }
 
+void AViewer::ExportGraphAsImage()
+{
+	if (!imfWindow && windows.mspWindows.Num() == 0)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange, TEXT("Export Graph: No graph loaded (load a data file first)"));
+		}
+		return;
+	}
 
+	if (!GEngine || !GEngine->GameViewport)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Viewport not available"));
+		}
+		return;
+	}
+
+	TSharedPtr<SWindow> Window = GEngine->GameViewport->GetWindow();
+	if (!Window.IsValid())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Window not valid"));
+		}
+		return;
+	}
+
+	TSharedPtr<FGenericWindow> NativeWindow = Window->GetNativeWindow();
+	if (!NativeWindow.IsValid())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Native window not valid"));
+		}
+		return;
+	}
+
+	void* ViewportHandle = NativeWindow->GetOSWindowHandle();
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Could not get desktop platform"));
+		}
+		return;
+	}
+
+	TArray<FString> SaveFilenames;
+	const bool bSaved = DesktopPlatform->SaveFileDialog(
+		ViewportHandle,
+		TEXT("Export Graph as Image"),
+		TEXT(""),
+		TEXT("graph_export.png"),
+		TEXT("PNG Image|*.png"),
+		0,
+		SaveFilenames
+	);
+
+	if (!bSaved || SaveFilenames.Num() == 0)
+	{
+		return;
+	}
+
+	PendingSavePath = SaveFilenames[0];
+
+	UGameViewportClient* GameViewport = GEngine->GameViewport;
+	if (ScreenshotDelegateHandle.IsValid())
+	{
+		GameViewport->OnScreenshotCaptured().Remove(ScreenshotDelegateHandle);
+		ScreenshotDelegateHandle.Reset();
+	}
+	ScreenshotDelegateHandle = GameViewport->OnScreenshotCaptured().AddUObject(this, &AViewer::OnScreenshotCaptured);
+
+	// Let Blueprint hide any widgets that shouldn't appear in the export
+	OnBeforeExportScreenshot();
+
+	// Delay the screenshot by 2 frames so widget visibility changes take effect
+	FTimerHandle TimerHandle;
+	GetWorldTimerManager().SetTimer(TimerHandle, FTimerDelegate::CreateLambda([this]()
+	{
+		FScreenshotRequest::RequestScreenshot(true);
+	}), 0.05f, false);
+}
+
+void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor>& Colors)
+{
+	UGameViewportClient* GameViewport = GEngine ? GEngine->GameViewport : nullptr;
+	if (GameViewport && ScreenshotDelegateHandle.IsValid())
+	{
+		GameViewport->OnScreenshotCaptured().Remove(ScreenshotDelegateHandle);
+		ScreenshotDelegateHandle.Reset();
+	}
+
+	if (PendingSavePath.IsEmpty())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: No save path"));
+		}
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	FVector2D BottomLeft, TopRight;
+	bool bGotBounds = false;
+	bool bIsIMF = false;
+
+	// Try IMF graph first
+	if (imfWindow)
+	{
+		imfWindow->GetWindowCornersOnScreen(BottomLeft, TopRight, false);
+		bGotBounds = true;
+		bIsIMF = true;
+	}
+	// Otherwise try MSP window
+	else if (windows.mspWindows.Num() > 0 && windows.mspWindows[0] && IsValid(windows.mspWindows[0]))
+	{
+		APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		if (PC)
+		{
+			FVector BoundOrigin, BoundExtents;
+			windows.mspWindows[0]->GetActorBounds(true, BoundOrigin, BoundExtents);
+
+			PC->ProjectWorldLocationToScreen(BoundOrigin - BoundExtents, BottomLeft);
+			PC->ProjectWorldLocationToScreen(BoundOrigin + BoundExtents, TopRight);
+			bGotBounds = true;
+		}
+	}
+
+	if (!bGotBounds)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Could not determine graph bounds"));
+		}
+		PendingSavePath.Empty();
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	// Separate padding for IMF vs MSP graphs (adjust these to taste)
+	float PaddingLeft, PaddingBottom, PaddingTop, PaddingRight;
+	if (bIsIMF)
+	{
+		PaddingLeft = 105.0f;
+		PaddingBottom = 105.0f;
+		PaddingTop = 25.0f;
+		PaddingRight = 40.0f;
+	}
+	else
+	{
+		// MSP padding
+		PaddingLeft = 70.0f;
+		PaddingBottom = 120.0f;
+		PaddingTop = 10.0f;
+		PaddingRight = 50.0f;
+	}
+
+	float MinX = FMath::Min(BottomLeft.X, TopRight.X);
+	float MaxX = FMath::Max(BottomLeft.X, TopRight.X);
+	float MinY = FMath::Min(BottomLeft.Y, TopRight.Y);
+	float MaxY = FMath::Max(BottomLeft.Y, TopRight.Y);
+
+	int32 CropLeft = FMath::Clamp(FMath::RoundToInt(MinX - PaddingLeft), 0, SizeX - 1);
+	int32 CropRight = FMath::Clamp(FMath::RoundToInt(MaxX + PaddingRight), 0, SizeX);
+	int32 CropTop = FMath::Clamp(FMath::RoundToInt(MinY - PaddingTop), 0, SizeY - 1);
+	int32 CropBottom = FMath::Clamp(FMath::RoundToInt(MaxY + PaddingBottom), 0, SizeY);
+
+	if (CropRight <= CropLeft || CropBottom <= CropTop)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Invalid crop region"));
+		}
+		PendingSavePath.Empty();
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	const int32 CropWidth = CropRight - CropLeft;
+	const int32 CropHeight = CropBottom - CropTop;
+
+	TArray<FColor> CroppedPixels;
+	CroppedPixels.SetNumUninitialized(CropWidth * CropHeight);
+
+	for (int32 Row = 0; Row < CropHeight; Row++)
+	{
+		const int32 SrcY = CropTop + Row;
+		for (int32 Col = 0; Col < CropWidth; Col++)
+		{
+			const int32 SrcX = CropLeft + Col;
+			const int32 SrcIndex = SrcY * SizeX + SrcX;
+			CroppedPixels[Row * CropWidth + Col] = Colors[SrcIndex];
+		}
+	}
+
+	// Encode as full-quality PNG using ImageWrapper
+	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
+	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+
+	if (!ImageWrapper.IsValid())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Failed to create PNG encoder"));
+		}
+		PendingSavePath.Empty();
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	// SetRaw expects raw pixel bytes: 4 bytes per pixel (BGRA)
+	if (!ImageWrapper->SetRaw(CroppedPixels.GetData(), CroppedPixels.Num() * sizeof(FColor),
+		CropWidth, CropHeight, ERGBFormat::BGRA, 8))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Failed to set raw image data"));
+		}
+		PendingSavePath.Empty();
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	const TArray64<uint8>& CompressedData = ImageWrapper->GetCompressed(100);
+	if (CompressedData.Num() == 0)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Failed to compress PNG"));
+		}
+		PendingSavePath.Empty();
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	// Convert TArray64 to TArray for SaveArrayToFile
+	TArray<uint8> CompressedBitmap;
+	CompressedBitmap.Append(CompressedData.GetData(), CompressedData.Num());
+
+	if (!FFileHelper::SaveArrayToFile(CompressedBitmap, *PendingSavePath))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, FString::Printf(TEXT("Export Graph: Failed to save to %s"), *PendingSavePath));
+		}
+		PendingSavePath.Empty();
+		OnAfterExportScreenshot();
+		return;
+	}
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, FString::Printf(TEXT("Graph exported to %s"), *PendingSavePath));
+	}
+	PendingSavePath.Empty();
+
+	// Let Blueprint restore any widgets that were hidden
+	OnAfterExportScreenshot();
+}
 
 FRow AViewer::GetRow(FString inStr) {
 	FRow outRow;
@@ -654,6 +932,12 @@ void AViewer::leftClickInput(const FInputActionValue& value) {
 
 
 	}
+
+	// IMF graph vertical marker - only active for .txt/.lst files (imfWindow is nullptr for .ly files)
+	if (imfWindow)
+	{
+		imfWindow->AddMarkerAtMousePosition();
+	}
 }
 
 
@@ -726,6 +1010,11 @@ void AViewer::rightClickInput(const FInputActionValue& value) {
 		mspMarkers.Empty();
 	}
 
+	// IMF graph vertical marker removal - only active for .txt/.lst files (imfWindow is nullptr for .ly files)
+	if (imfWindow)
+	{
+		imfWindow->RemoveMarkerAtMousePosition();
+	}
 }
 
 

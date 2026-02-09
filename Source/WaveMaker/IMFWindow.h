@@ -76,6 +76,22 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TArray<int> displayedColumns;
 
+	// Whether to show grid lines on the graph
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		bool bShowGridLines = true;
+
+	// Number of horizontal grid divisions (default 9, matching Y-axis tick marks)
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		int gridHorizontalDivisions = 9;
+
+	// Number of vertical grid divisions (default 12)
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		int gridVerticalDivisions = 12;
+
+	// Grid line color (faint gray by default)
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		FColor gridLineColor = FColor(180, 180, 180, 255);
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -226,6 +242,18 @@ public:
 	// Clears all markers
 	UFUNCTION(BlueprintCallable)
 		void ClearAllMarkers();
+
+	// Rebuilds vertical marker lines in graphLines so they are rendered by the Blueprint painter
+	// Uses keys -10000, -10001, etc. to avoid conflicts with column/equation graph keys
+	// Called automatically when markers are added/removed
+	UFUNCTION(BlueprintCallable)
+		void RefreshMarkerGraphLines();
+
+	// Adds faint grid lines (horizontal and vertical) to graphLines
+	// Uses keys -20000, -20001, etc. to avoid conflicts
+	// Call this after changing axis ranges or toggling grid visibility
+	UFUNCTION(BlueprintCallable)
+		void RefreshGridLines();
 
 	// Gets screen X positions for all markers (for rendering)
 	// Returns array of screen X coordinates for markers within visible range

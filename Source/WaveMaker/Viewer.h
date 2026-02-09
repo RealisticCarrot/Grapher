@@ -211,6 +211,10 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 		void loadFile();
+
+	// Captures the IMF graph area (with axis labels and markers), crops to graph region, and saves as PNG via Save File Dialog
+	UFUNCTION(BlueprintCallable)
+		void ExportGraphAsImage();
 	
 	UFUNCTION(BlueprintCallable)
 		FWindowManager getWindows();
@@ -235,5 +239,25 @@ public:
 	// Implement this in Blueprint to clear any cached window references
 	UFUNCTION(BlueprintImplementableEvent)
 		void OnBeforeReset();
+
+	// Called just before the export screenshot is taken
+	// Use this to hide any widgets you don't want in the exported image (e.g. graph manager, color wheel)
+	UFUNCTION(BlueprintImplementableEvent)
+		void OnBeforeExportScreenshot();
+
+	// Called after the export screenshot has been saved
+	// Use this to restore any widgets you hid in OnBeforeExportScreenshot
+	UFUNCTION(BlueprintImplementableEvent)
+		void OnAfterExportScreenshot();
+
+private:
+	// One-shot callback when viewport screenshot is captured (used by ExportGraphAsImage)
+	void OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor>& Colors);
+
+	// Path chosen in Save File Dialog; used in OnScreenshotCaptured
+	FString PendingSavePath;
+
+	// So we can unbind the screenshot callback after one use
+	FDelegateHandle ScreenshotDelegateHandle;
 
 };

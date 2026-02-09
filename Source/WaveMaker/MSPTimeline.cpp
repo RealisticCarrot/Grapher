@@ -86,8 +86,9 @@ void AMSPTimeline::Tick(float DeltaTime)
 		materialInstance->SetScalarParameterValue("maxValue", mspDataProps.maxValue);
 		materialInstance->SetScalarParameterValue("minValue", mspDataProps.minValue);
 		materialInstance->SetScalarParameterValue("avgValue", mspDataProps.avgValue);
-		materialInstance->SetScalarParameterValue("div", 0.3f);
-		materialInstance->SetScalarParameterValue("a", 0.8f);
+		// Use auto-computed values that fit the actual data range
+		materialInstance->SetScalarParameterValue("div", mspDataProps.autoDiv);
+		materialInstance->SetScalarParameterValue("a", mspDataProps.autoA);
 		materialInstance->SetScalarParameterValue("channel", 2.0f - 1.0f);
 
 

@@ -376,8 +376,9 @@ void AMSPWindow::loadFile(FString fileName) {
 	materialInstance->SetScalarParameterValue("maxValue", mspProperties.maxValue);
 	materialInstance->SetScalarParameterValue("minValue", mspProperties.minValue);
 	materialInstance->SetScalarParameterValue("avgValue", mspProperties.avgValue);
-	materialInstance->SetScalarParameterValue("div", 0.3f);
-	materialInstance->SetScalarParameterValue("a", 0.8f);
+	// Use auto-computed values that fit the actual data range
+	setMSPscalar("div", mspProperties.autoDiv);
+	setMSPscalar("a", mspProperties.autoA);
 	materialInstance->SetScalarParameterValue("channel", 2.0f - 1.0f);
 
 
@@ -414,6 +415,8 @@ void AMSPWindow::getMspProperties(TArray<float> data) {
 		mspProperties.maxValue = 0.0f;
 		mspProperties.minValue = 0.0f;
 		mspProperties.avgValue = 0.0f;
+		mspProperties.autoDiv = 0.3f;
+		mspProperties.autoA = 0.8f;
 		return;
 	}
 	
@@ -432,6 +435,29 @@ void AMSPWindow::getMspProperties(TArray<float> data) {
 	mspProperties.maxValue = maxV;
 	mspProperties.minValue = minV;
 	mspProperties.avgValue = sumV / (float)data.Num();
+
+	// Auto-compute Color Center (div) and Color Width (a) to fit the data range.
+	// The material uses a Lorentzian: y = 1 / (1 + (x - 20000*div)^2 / (10000*a))
+	// We want the color window centered on the data midpoint with spread covering the full range.
+	float dataCenter = (maxV + minV) / 2.0f;
+	float dataRange = maxV - minV;
+
+	// Add 10% padding so extreme values get better color contrast
+	dataRange *= 1.1f;
+
+	// Prevent degenerate case where all values are identical
+	if (dataRange < 1.0f) dataRange = 1.0f;
+
+	// div positions the center at dataCenter: 20000 * div = dataCenter
+	mspProperties.autoDiv = dataCenter / 20000.0f;
+
+	// a controls width: at data edges y = yTarget (0.2), distance from center = dataRange/2
+	// Solving: a = (dataRange/2)^2 / (10000 * (1/yTarget - 1))
+	// With yTarget = 0.2: (1/0.2 - 1) = 4, so a = dataRange^2 / 160000
+	mspProperties.autoA = (dataRange * dataRange) / 160000.0f;
+
+	// Ensure a minimum width so the color gradient is always visible
+	mspProperties.autoA = FMath::Max(mspProperties.autoA, 0.01f);
 }
 
 

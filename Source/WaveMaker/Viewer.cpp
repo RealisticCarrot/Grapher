@@ -43,6 +43,7 @@
 #include "UnrealClient.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
+#include "Async/Async.h"
 
 
 // Sets default values
@@ -193,15 +194,32 @@ void AViewer::Tick(float DeltaTime)
 
 	if (windows.mspWindows.Num() > 0) {
 		
-		windows.mspWindows[0]->timeLoc = mspTimeLoc;
-
-		// Forward time range from slider to MSP window
-		if (mspTimeSpanUnit > 0.0f) {
-			windows.mspWindows[0]->timeSpanUnit = mspTimeSpanUnit;
+		if (bUseDirectTimeRange) {
+			// Direct range mode: set main window material directly (NOT through
+			// setMSPscalar, which would also zoom the timeline/legend materials).
+			// Do NOT update startLoc/endLoc — the Blueprint label positioning reads those.
+			windows.mspWindows[0]->bUseDirectTimeRange = true;
+			if (windows.mspWindows[0]->materialInstance) {
+				windows.mspWindows[0]->materialInstance->SetScalarParameterValue("start", mspStartDirect);
+				windows.mspWindows[0]->materialInstance->SetScalarParameterValue("end", mspEndDirect);
+			}
+			// Only update the internal viewport range (for hover calculations)
+			windows.mspWindows[0]->viewStartLoc = mspStartDirect;
+			windows.mspWindows[0]->viewEndLoc = mspEndDirect;
 		}
-		// Sync auto-computed value back to slider after file load
-		else if (windows.mspWindows[0]->timeSpanUnit > 0.0f) {
-			mspTimeSpanUnit = windows.mspWindows[0]->timeSpanUnit;
+		else {
+			// Original slider/timeline mode
+			windows.mspWindows[0]->bUseDirectTimeRange = false;
+			windows.mspWindows[0]->timeLoc = mspTimeLoc;
+
+			// Forward time range from slider to MSP window
+			if (mspTimeSpanUnit > 0.0f) {
+				windows.mspWindows[0]->timeSpanUnit = mspTimeSpanUnit;
+			}
+			// Sync auto-computed value back to slider after file load
+			else if (windows.mspWindows[0]->timeSpanUnit > 0.0f) {
+				mspTimeSpanUnit = windows.mspWindows[0]->timeSpanUnit;
+			}
 		}
 	}
 
@@ -353,7 +371,7 @@ void AViewer::loadFile() {
 				return;
 			}
 
-			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 30.0f), (GetActorUpVector()).ToOrientationRotator(), params);
+			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 0.0f), (GetActorUpVector()).ToOrientationRotator(), params);
 			if (newWindow)
 			{
 				windows.mspWindows.Add(newWindow);
@@ -644,22 +662,36 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 		return;
 	}
 
-	// Separate padding for IMF vs MSP graphs (adjust these to taste)
+	// Scale projected bounds from viewport space to image space
+	// (needed when using high-res screenshot multiplier)
+	FVector2D ViewportSize;
+	GEngine->GameViewport->GetViewportSize(ViewportSize);
+	float ImageScaleX = (float)SizeX / FMath::Max(ViewportSize.X, 1.0f);
+	float ImageScaleY = (float)SizeY / FMath::Max(ViewportSize.Y, 1.0f);
+	BottomLeft.X *= ImageScaleX;
+	BottomLeft.Y *= ImageScaleY;
+	TopRight.X *= ImageScaleX;
+	TopRight.Y *= ImageScaleY;
+
+	// Scale padding based on actual image resolution (designed for 1920x1080)
+	float ScaleX = (float)SizeX / 1920.0f;
+	float ScaleY = (float)SizeY / 1080.0f;
+
 	float PaddingLeft, PaddingBottom, PaddingTop, PaddingRight;
 	if (bIsIMF)
 	{
-		PaddingLeft = 105.0f;
-		PaddingBottom = 105.0f;
-		PaddingTop = 25.0f;
-		PaddingRight = 40.0f;
+		PaddingLeft = 160.0f * ScaleX;
+		PaddingBottom = 100.0f * ScaleY;
+		PaddingTop = 90.0f * ScaleY;
+		PaddingRight = 55.0f * ScaleX;
 	}
 	else
 	{
 		// MSP padding
-		PaddingLeft = 70.0f;
-		PaddingBottom = 120.0f;
-		PaddingTop = 10.0f;
-		PaddingRight = 50.0f;
+		PaddingLeft = 90.0f * ScaleX;
+		PaddingBottom = 100.0f * ScaleY;
+		PaddingTop = 80.0f * ScaleY;
+		PaddingRight = 130.0f * ScaleX;
 	}
 
 	float MinX = FMath::Min(BottomLeft.X, TopRight.X);
@@ -686,83 +718,94 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 	const int32 CropWidth = CropRight - CropLeft;
 	const int32 CropHeight = CropBottom - CropTop;
 
+	// Fast row-based memcpy instead of per-pixel copy
 	TArray<FColor> CroppedPixels;
 	CroppedPixels.SetNumUninitialized(CropWidth * CropHeight);
 
 	for (int32 Row = 0; Row < CropHeight; Row++)
 	{
-		const int32 SrcY = CropTop + Row;
-		for (int32 Col = 0; Col < CropWidth; Col++)
-		{
-			const int32 SrcX = CropLeft + Col;
-			const int32 SrcIndex = SrcY * SizeX + SrcX;
-			CroppedPixels[Row * CropWidth + Col] = Colors[SrcIndex];
-		}
+		FMemory::Memcpy(
+			&CroppedPixels[Row * CropWidth],
+			&Colors[(CropTop + Row) * SizeX + CropLeft],
+			CropWidth * sizeof(FColor)
+		);
 	}
 
-	// Encode as full-quality PNG using ImageWrapper
-	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
-	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
-
-	if (!ImageWrapper.IsValid())
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Failed to create PNG encoder"));
-		}
-		PendingSavePath.Empty();
-		OnAfterExportScreenshot();
-		return;
-	}
-
-	// SetRaw expects raw pixel bytes: 4 bytes per pixel (BGRA)
-	if (!ImageWrapper->SetRaw(CroppedPixels.GetData(), CroppedPixels.Num() * sizeof(FColor),
-		CropWidth, CropHeight, ERGBFormat::BGRA, 8))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Failed to set raw image data"));
-		}
-		PendingSavePath.Empty();
-		OnAfterExportScreenshot();
-		return;
-	}
-
-	const TArray64<uint8>& CompressedData = ImageWrapper->GetCompressed(100);
-	if (CompressedData.Num() == 0)
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Failed to compress PNG"));
-		}
-		PendingSavePath.Empty();
-		OnAfterExportScreenshot();
-		return;
-	}
-
-	// Convert TArray64 to TArray for SaveArrayToFile
-	TArray<uint8> CompressedBitmap;
-	CompressedBitmap.Append(CompressedData.GetData(), CompressedData.Num());
-
-	if (!FFileHelper::SaveArrayToFile(CompressedBitmap, *PendingSavePath))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, FString::Printf(TEXT("Export Graph: Failed to save to %s"), *PendingSavePath));
-		}
-		PendingSavePath.Empty();
-		OnAfterExportScreenshot();
-		return;
-	}
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, FString::Printf(TEXT("Graph exported to %s"), *PendingSavePath));
-	}
+	// Move heavy PNG encode + file write to a background thread so
+	// the game thread (and framerate) is not blocked
+	FString SavePath = PendingSavePath;
 	PendingSavePath.Empty();
 
-	// Let Blueprint restore any widgets that were hidden
-	OnAfterExportScreenshot();
+	Async(EAsyncExecution::ThreadPool,
+		[this, PixelData = MoveTemp(CroppedPixels), CropWidth, CropHeight, SavePath]() mutable
+	{
+		bool bSuccess = false;
+		FString ErrorMsg;
+
+		// PNG encode on background thread
+		IImageWrapperModule& ImageWrapperModule =
+			FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
+		TSharedPtr<IImageWrapper> ImageWrapper =
+			ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+
+		if (!ImageWrapper.IsValid())
+		{
+			ErrorMsg = TEXT("Export Graph: Failed to create PNG encoder");
+		}
+		else if (!ImageWrapper->SetRaw(PixelData.GetData(), PixelData.Num() * sizeof(FColor),
+			CropWidth, CropHeight, ERGBFormat::BGRA, 8))
+		{
+			ErrorMsg = TEXT("Export Graph: Failed to set raw image data");
+		}
+		else
+		{
+			// Quality 0 = fastest PNG compression (still lossless — PNG is always lossless)
+			const TArray64<uint8>& CompressedData = ImageWrapper->GetCompressed(0);
+			if (CompressedData.Num() == 0)
+			{
+				ErrorMsg = TEXT("Export Graph: Failed to compress PNG");
+			}
+			else
+			{
+				// Write directly from TArray64 to avoid extra copy
+				FArchive* Ar = IFileManager::Get().CreateFileWriter(*SavePath);
+				if (Ar)
+				{
+					Ar->Serialize(const_cast<uint8*>(CompressedData.GetData()), CompressedData.Num());
+					Ar->Close();
+					delete Ar;
+					bSuccess = true;
+				}
+				else
+				{
+					ErrorMsg = FString::Printf(TEXT("Export Graph: Failed to save to %s"), *SavePath);
+				}
+			}
+		}
+
+		// Free pixel data now that encoding is done (before returning to game thread)
+		PixelData.Empty();
+
+		// Return to game thread for UI updates and Blueprint event
+		AsyncTask(ENamedThreads::GameThread, [this, bSuccess, ErrorMsg, SavePath]()
+		{
+			if (GEngine)
+			{
+				if (bSuccess)
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+						FString::Printf(TEXT("Graph exported to %s"), *SavePath));
+				}
+				else
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, ErrorMsg);
+				}
+			}
+
+			// Let Blueprint restore any widgets that were hidden
+			OnAfterExportScreenshot();
+		});
+	});
 }
 
 FRow AViewer::GetRow(FString inStr) {
@@ -879,6 +922,111 @@ float AViewer::AverageColumn(const FString& equation, const FString& startTime, 
 
 
 
+float AViewer::TimeStringToNormalized(const FString& timeStr, bool& bSuccess, FString& outError)
+{
+	bSuccess = false;
+	outError = TEXT("");
+
+	if (windows.mspWindows.Num() == 0 || !IsValid(windows.mspWindows[0]))
+	{
+		outError = TEXT("No MSP window loaded");
+		return 0.0f;
+	}
+
+	AMSPWindow* mspWin = windows.mspWindows[0];
+	float timeDiff = mspWin->endTime - mspWin->startTime;
+	if (FMath::IsNearlyZero(timeDiff))
+	{
+		outError = TEXT("Data has zero time range");
+		return 0.0f;
+	}
+
+	FString trimmed = timeStr.TrimStartAndEnd();
+	if (trimmed.IsEmpty())
+	{
+		outError = TEXT("Empty time string");
+		return 0.0f;
+	}
+
+	// Parse DD:HH:MM or HH:MM or plain minutes
+	TArray<FString> parts;
+	trimmed.ParseIntoArray(parts, TEXT(":"), true);
+
+	float totalSeconds = 0.0f;
+
+	if (parts.Num() == 3)
+	{
+		// DD:HH:MM
+		float days = FCString::Atof(*parts[0]);
+		float hours = FCString::Atof(*parts[1]);
+		float minutes = FCString::Atof(*parts[2]);
+		totalSeconds = days * 86400.0f + hours * 3600.0f + minutes * 60.0f;
+	}
+	else if (parts.Num() == 2)
+	{
+		// HH:MM
+		float hours = FCString::Atof(*parts[0]);
+		float minutes = FCString::Atof(*parts[1]);
+		totalSeconds = hours * 3600.0f + minutes * 60.0f;
+	}
+	else if (parts.Num() == 1)
+	{
+		// Plain minutes
+		float minutes = FCString::Atof(*parts[0]);
+		totalSeconds = minutes * 60.0f;
+	}
+	else
+	{
+		outError = TEXT("Invalid format. Use DD:HH:MM, HH:MM, or minutes");
+		return 0.0f;
+	}
+
+	float normalized = totalSeconds / timeDiff;
+	bSuccess = true;
+	return FMath::Clamp(normalized, 0.0f, 1.0f);
+}
+
+FString AViewer::NormalizedToTimeString(float normalizedValue)
+{
+	if (windows.mspWindows.Num() == 0 || !IsValid(windows.mspWindows[0]))
+	{
+		return TEXT("--:--:--");
+	}
+
+	AMSPWindow* mspWin = windows.mspWindows[0];
+	float timeDiff = mspWin->endTime - mspWin->startTime;
+	float totalSeconds = normalizedValue * timeDiff;
+
+	int32 totalSecondsInt = FMath::RoundToInt(totalSeconds);
+	int32 days = totalSecondsInt / 86400;
+	int32 remaining = totalSecondsInt % 86400;
+	int32 hours = remaining / 3600;
+	remaining = remaining % 3600;
+	int32 minutes = remaining / 60;
+
+	return FString::Printf(TEXT("%d:%02d:%02d"), days, hours, minutes);
+}
+
+FString AViewer::GetDataDurationString()
+{
+	if (windows.mspWindows.Num() == 0 || !IsValid(windows.mspWindows[0]))
+	{
+		return TEXT("No data loaded");
+	}
+
+	AMSPWindow* mspWin = windows.mspWindows[0];
+	float timeDiff = mspWin->endTime - mspWin->startTime;
+
+	int32 totalSecondsInt = FMath::RoundToInt(timeDiff);
+	int32 days = totalSecondsInt / 86400;
+	int32 remaining = totalSecondsInt % 86400;
+	int32 hours = remaining / 3600;
+	remaining = remaining % 3600;
+	int32 minutes = remaining / 60;
+
+	return FString::Printf(TEXT("%d:%02d:%02d"), days, hours, minutes);
+}
+
 FWindowManager AViewer::getWindows() {
 	return windows;
 }
@@ -984,7 +1132,15 @@ void AViewer::leftDownInput(const FInputActionValue& value) {
 					float xLoc = (mouseLoc.X - bottomLeft.X) / (topRight.X - bottomLeft.X);
 					
 
-					mspTimeLoc = xLoc;
+					if (bUseDirectTimeRange) {
+						// Re-center the zoomed window on the clicked position
+						float span = mspEndDirect - mspStartDirect;
+						mspStartDirect = FMath::Clamp(xLoc - span / 2.0f, 0.0f, 1.0f - span);
+						mspEndDirect = mspStartDirect + span;
+					}
+					else {
+						mspTimeLoc = xLoc;
+					}
 					
 
 				}

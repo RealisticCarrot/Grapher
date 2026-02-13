@@ -182,7 +182,7 @@ void AMSPWindow::Tick(float DeltaTime)
 				{
 					float timeSize = 181.0f * 6.0f;
 					
-					float valuepx = (MUV.X * (endLoc - startLoc)) + startLoc;
+					float valuepx = (MUV.X * (viewEndLoc - viewStartLoc)) + viewStartLoc;
 					float valuepy = ((float)channel + (1.0f - MUV.Y));
 					float valuep = valuepx - valuepy;
 
@@ -192,7 +192,7 @@ void AMSPWindow::Tick(float DeltaTime)
 					int vInd = vIndx + vIndy;
 
 					int valueIndex = (int)(valuep * (float)peakData.Num());
-					int timeIndex = (int)(((MUV.X * (endLoc - startLoc)) + startLoc) * (float)peakTimes.Num());
+					int timeIndex = (int)(((MUV.X * (viewEndLoc - viewStartLoc)) + viewStartLoc) * (float)peakTimes.Num());
 
 					//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Yellow, FString::SanitizeFloat( vIndy ));
 					//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, (mouseLoc - bottomLeft).ToString());
@@ -210,9 +210,12 @@ void AMSPWindow::Tick(float DeltaTime)
 	
 
 
-	if (timeSpanUnit > 0.0f) {
-		setMSPscalar("start", timeLoc - (timeSpanUnit / 2.0f));
-		setMSPscalar("end", timeLoc + (timeSpanUnit / 2.0f));
+	// Only auto-compute start/end from timeLoc/timeSpanUnit when NOT in direct range mode
+	if (timeSpanUnit > 0.0f && !bUseDirectTimeRange) {
+		float autoStart = FMath::Clamp(timeLoc - (timeSpanUnit / 2.0f), 0.0f, 1.0f);
+		float autoEnd = FMath::Clamp(timeLoc + (timeSpanUnit / 2.0f), 0.0f, 1.0f);
+		setMSPscalar("start", autoStart);
+		setMSPscalar("end", autoEnd);
 
 	}
 
@@ -249,9 +252,11 @@ void AMSPWindow::setMSPscalar(FString paramName, float value) {
 	}
 	else if (paramName == "start") {
 		startLoc = value;
+		viewStartLoc = value;
 	}
 	else if (paramName == "end") {
 		endLoc = value;
+		viewEndLoc = value;
 	}
 	
 }
@@ -860,5 +865,30 @@ int32 AMSPWindow::GetPeakTimesCount() const
 int32 AMSPWindow::GetPeakDataCount() const
 {
 	return peakData.Num();
+}
+
+float AMSPWindow::GetTimeAtViewFraction(float fraction) const
+{
+	if (!bIsDataLoaded || peakTimes.Num() == 0)
+	{
+		return 0.0f;
+	}
+
+	// Use the zoomed range if in direct mode, otherwise use startLoc/endLoc
+	float rangeStart = bUseDirectTimeRange ? viewStartLoc : startLoc;
+	float rangeEnd = bUseDirectTimeRange ? viewEndLoc : endLoc;
+
+	// Interpolate within the visible range, clamp to valid [0,1] so we never
+	// read a time from outside the dataset (avoids negative times on first label)
+	float normalizedPos = FMath::Clamp(
+		rangeStart + fraction * (rangeEnd - rangeStart), 0.0f, 1.0f);
+
+	// Map to peak times array index
+	int32 timeIndex = FMath::Clamp(
+		FMath::RoundToInt(normalizedPos * (float)(peakTimes.Num() - 1)),
+		0, peakTimes.Num() - 1
+	);
+
+	return FMath::Max(peakTimes[timeIndex], 0.0f);
 }
 

@@ -119,6 +119,17 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		float mspTimeSpanUnit;
 
+	// Direct time range control — normalized [0,1] values set from Blueprint text boxes
+	UPROPERTY(BlueprintReadWrite)
+		float mspStartDirect = 0.0f;
+
+	UPROPERTY(BlueprintReadWrite)
+		float mspEndDirect = 1.0f;
+
+	// When true, mspStartDirect/mspEndDirect override the timeLoc/timeSpanUnit system
+	UPROPERTY(BlueprintReadWrite)
+		bool bUseDirectTimeRange = false;
+
 
 	UPROPERTY(EditAnywhere)
 		TSubclassOf<AMSPWindow> mspWindowClass;
@@ -232,6 +243,21 @@ public:
 		float AverageColumn(const FString& equation, const FString& startTime, const FString& endTime, FString& outErrorMessage);
 
 
+	// Converts a time string (DD:HH:MM, HH:MM, or plain minutes) to a normalized [0,1]
+	// position based on the currently loaded MSP data's time range.
+	// The time is relative to the start of the dataset.
+	UFUNCTION(BlueprintCallable, Category = "MSP Time")
+		float TimeStringToNormalized(const FString& timeStr, bool& bSuccess, FString& outError);
+
+	// Converts a normalized [0,1] position back to a DD:HH:MM string
+	// relative to the start of the dataset.
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Time")
+		FString NormalizedToTimeString(float normalizedValue);
+
+	// Returns the total duration of the loaded MSP data as a DD:HH:MM string
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Time")
+		FString GetDataDurationString();
+
 	UFUNCTION(BlueprintImplementableEvent)
 		void CreateIMFGraphWidgets();
 	
@@ -239,6 +265,11 @@ public:
 	// Implement this in Blueprint to clear any cached window references
 	UFUNCTION(BlueprintImplementableEvent)
 		void OnBeforeReset();
+
+	// Resolution multiplier for graph export (1.0 = viewport res, 2.0 = 2x, 4.0 = 4x)
+	// Higher values produce sharper exports but take longer to render
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Export")
+		float exportResolutionMultiplier = 1.0f;
 
 	// Called just before the export screenshot is taken
 	// Use this to hide any widgets you don't want in the exported image (e.g. graph manager, color wheel)

@@ -162,6 +162,13 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		float endLoc;
 
+	// Internal: actual visible range on the spectrogram (for hover calculations).
+	// In direct range mode these differ from startLoc/endLoc so labels stay fixed.
+	UPROPERTY()
+		float viewStartLoc = 0.0f;
+	UPROPERTY()
+		float viewEndLoc = 1.0f;
+
 	UPROPERTY(BlueprintReadWrite)
 		float timeLoc;
 
@@ -190,6 +197,11 @@ public:
 
 	UPROPERTY(BlueprintReadWrite)
 		FVector2D mouseUV;
+
+	// When true, Tick() will NOT overwrite start/end from timeLoc/timeSpanUnit
+	// (allows direct control from Blueprint text boxes)
+	UPROPERTY(BlueprintReadWrite)
+		bool bUseDirectTimeRange = false;
 
 
 
@@ -256,5 +268,12 @@ public:
 	// Get the number of peak data entries
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Data")
 		int32 GetPeakDataCount() const;
+
+	// Returns the time (in seconds) at a fractional position [0,1] across the
+	// currently visible range. Use this for timestamp labels so text updates
+	// without shifting label positions.
+	// fraction = 0.0 → left edge time, fraction = 1.0 → right edge time
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Time")
+		float GetTimeAtViewFraction(float fraction) const;
 
 };

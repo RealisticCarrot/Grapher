@@ -22,6 +22,27 @@ public:
 
 };
 
+USTRUCT(BlueprintType)
+struct FIMFLegendEntry {
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintReadWrite)
+		bool bIsEquation = false;
+
+	UPROPERTY(BlueprintReadWrite)
+		int32 Key = 0;
+
+	UPROPERTY(BlueprintReadWrite)
+		FLinearColor Color = FLinearColor::White;
+
+	UPROPERTY(BlueprintReadWrite)
+		FString DefaultName;
+
+	UPROPERTY(BlueprintReadWrite)
+		FString UserLabel;
+};
+
 UCLASS()
 class WAVEMAKER_API AIMFWindow : public AActor
 {
@@ -75,6 +96,16 @@ public:
 	// Call AddDisplayedColumn/RemoveDisplayedColumn when toggling columns
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		TArray<int> displayedColumns;
+
+	// === Legend System ===
+
+	// Currently visible legend entries (columns)
+	UPROPERTY(BlueprintReadWrite)
+		TMap<int32, FIMFLegendEntry> ColumnLegend;
+
+	// Currently visible legend entries (equations)
+	UPROPERTY(BlueprintReadWrite)
+		TMap<int32, FIMFLegendEntry> EquationLegend;
 
 	// Whether to show grid lines on the graph
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
@@ -278,4 +309,39 @@ public:
 	UFUNCTION(BlueprintCallable)
 		void ClearDisplayedColumns();
 
+	// === Legend System ===
+
+	// Registers a legend entry (shown when a graph is toggled on)
+	// bIsEquation: true for custom equations, false for data columns
+	// Key: ColumnIndex for columns, EquationKey for equations
+	// Color: the graph line color
+	// DefaultName: default display name (e.g. "Col5" or equation string)
+	UFUNCTION(BlueprintCallable)
+		void RegisterLegendEntry(bool bIsEquation, int32 Key, FLinearColor Color, const FString& DefaultName);
+
+	// Unregisters a legend entry (when a graph is toggled off)
+	UFUNCTION(BlueprintCallable)
+		void UnregisterLegendEntry(bool bIsEquation, int32 Key);
+
+	// Sets a user-typed label for a legend entry (persists across toggles)
+	UFUNCTION(BlueprintCallable)
+		void SetLegendUserLabel(bool bIsEquation, int32 Key, const FString& UserLabel);
+
+	// Returns all currently visible legend entries (columns + equations combined)
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		TArray<FIMFLegendEntry> GetLegendEntries() const;
+
+	// Clears all legend entries and persisted labels
+	UFUNCTION(BlueprintCallable)
+		void ClearLegend();
+
+	// Fired whenever the legend changes (entry added/removed/label edited)
+	// Implement in Blueprint to rebuild the legend UI
+	UFUNCTION(BlueprintImplementableEvent)
+		void OnIMFLegendChanged();
+
+private:
+	// Persisted user labels survive toggle off/on (keyed by column index or equation key)
+	TMap<int32, FString> ColumnUserLabels;
+	TMap<int32, FString> EquationUserLabels;
 };

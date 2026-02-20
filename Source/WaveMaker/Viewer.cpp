@@ -682,7 +682,7 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 	{
 		PaddingLeft = 160.0f * ScaleX;
 		PaddingBottom = 100.0f * ScaleY;
-		PaddingTop = 90.0f * ScaleY;
+		PaddingTop = 120.0f * ScaleY;
 		PaddingRight = 55.0f * ScaleX;
 	}
 	else
@@ -690,7 +690,7 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 		// MSP padding
 		PaddingLeft = 90.0f * ScaleX;
 		PaddingBottom = 100.0f * ScaleY;
-		PaddingTop = 80.0f * ScaleY;
+		PaddingTop = 110.0f * ScaleY;
 		PaddingRight = 130.0f * ScaleX;
 	}
 

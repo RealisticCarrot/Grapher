@@ -37,6 +37,10 @@ void AIMFWindow::BeginPlay()
 	equationGraphs.Empty();
 	equationGraphLines.Empty();
 	displayedColumns.Empty();
+	ColumnLegend.Empty();
+	EquationLegend.Empty();
+	ColumnUserLabels.Empty();
+	EquationUserLabels.Empty();
 	
 	AViewer* viewer = Cast<AViewer>(GetWorld()->GetFirstPlayerController()->GetPawn());
 	imfData = viewer->imfData;
@@ -2222,4 +2226,102 @@ void AIMFWindow::RemoveDisplayedColumn(int col)
 void AIMFWindow::ClearDisplayedColumns()
 {
 	displayedColumns.Empty();
+}
+
+// === Legend System Implementation ===
+
+void AIMFWindow::RegisterLegendEntry(bool bIsEquation, int32 Key, FLinearColor Color, const FString& DefaultName)
+{
+	FIMFLegendEntry Entry;
+	Entry.bIsEquation = bIsEquation;
+	Entry.Key = Key;
+	Entry.Color = Color;
+	Entry.DefaultName = DefaultName;
+
+	// Restore persisted user label if one exists
+	if (bIsEquation)
+	{
+		if (const FString* Saved = EquationUserLabels.Find(Key))
+		{
+			Entry.UserLabel = *Saved;
+		}
+		EquationLegend.Add(Key, Entry);
+	}
+	else
+	{
+		if (const FString* Saved = ColumnUserLabels.Find(Key))
+		{
+			Entry.UserLabel = *Saved;
+		}
+		ColumnLegend.Add(Key, Entry);
+	}
+
+	OnIMFLegendChanged();
+}
+
+void AIMFWindow::UnregisterLegendEntry(bool bIsEquation, int32 Key)
+{
+	if (bIsEquation)
+	{
+		EquationLegend.Remove(Key);
+	}
+	else
+	{
+		ColumnLegend.Remove(Key);
+	}
+
+	OnIMFLegendChanged();
+}
+
+void AIMFWindow::SetLegendUserLabel(bool bIsEquation, int32 Key, const FString& UserLabel)
+{
+	// Persist the label so it survives toggle off/on
+	if (bIsEquation)
+	{
+		EquationUserLabels.Add(Key, UserLabel);
+		if (FIMFLegendEntry* Entry = EquationLegend.Find(Key))
+		{
+			Entry->UserLabel = UserLabel;
+		}
+	}
+	else
+	{
+		ColumnUserLabels.Add(Key, UserLabel);
+		if (FIMFLegendEntry* Entry = ColumnLegend.Find(Key))
+		{
+			Entry->UserLabel = UserLabel;
+		}
+	}
+}
+
+TArray<FIMFLegendEntry> AIMFWindow::GetLegendEntries() const
+{
+	TArray<FIMFLegendEntry> Result;
+
+	for (const auto& Pair : ColumnLegend)
+	{
+		Result.Add(Pair.Value);
+	}
+	for (const auto& Pair : EquationLegend)
+	{
+		Result.Add(Pair.Value);
+	}
+
+	// Sort by DefaultName for stable ordering
+	Result.Sort([](const FIMFLegendEntry& A, const FIMFLegendEntry& B)
+	{
+		return A.DefaultName < B.DefaultName;
+	});
+
+	return Result;
+}
+
+void AIMFWindow::ClearLegend()
+{
+	ColumnLegend.Empty();
+	EquationLegend.Empty();
+	ColumnUserLabels.Empty();
+	EquationUserLabels.Empty();
+
+	OnIMFLegendChanged();
 }

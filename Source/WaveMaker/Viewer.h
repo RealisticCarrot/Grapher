@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Blueprint/UserWidget.h"
 
 
 
@@ -82,7 +83,7 @@ public:
 
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-		AActor* mspWindow;
+		AMSPWindow* mspWindow;
 
 	UPROPERTY(BlueprintReadWrite)
 		FWindowManager windows;
@@ -144,6 +145,11 @@ public:
 
 
 
+
+	// Reference to the main menu widget so it can be hidden/shown during export
+	// regardless of whether IMF or MSP is active. Set this in Blueprint on creation.
+	UPROPERTY(BlueprintReadWrite, Category = "UI")
+		UUserWidget* menuWidget;
 
 	// IMF STUFF
 	
@@ -260,6 +266,11 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent)
 		void CreateIMFGraphWidgets();
+
+	// Called right after the IMF window actor is spawned in loadFile()
+	// Use this to set up legend widget bindings, etc.
+	UFUNCTION(BlueprintImplementableEvent)
+		void OnIMFWindowSpawned();
 	
 	// Called BEFORE resetting/destroying windows when loading a new file
 	// Implement this in Blueprint to clear any cached window references

@@ -276,4 +276,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MSP Time")
 		float GetTimeAtViewFraction(float fraction) const;
 
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		FUIPositions GetUIPositions() const;
+
 };

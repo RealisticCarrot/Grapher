@@ -4,9 +4,19 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "structs.h"
 #include "IMFWindow.generated.h"
 
 struct FRow;
+
+UENUM(BlueprintType)
+enum class EAngleMode : uint8
+{
+	Radians    UMETA(DisplayName = "Radians"),
+	Degrees    UMETA(DisplayName = "Degrees")
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnIMFLegendChanged);
 
 USTRUCT(BlueprintType)
 struct FLineChain {
@@ -107,6 +117,10 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		TMap<int32, FIMFLegendEntry> EquationLegend;
 
+	// Angle mode for trig functions in custom equations (Sin, Cos, Tan, Atan, Atan2)
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+		EAngleMode angleMode = EAngleMode::Radians;
+
 	// Whether to show grid lines on the graph
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 		bool bShowGridLines = true;
@@ -146,6 +160,9 @@ public:
 	UFUNCTION(BlueprintCallable)
 		void GetWindowCornersOnScreen(FVector2D &bottomLeft, FVector2D &topRight, bool scaled = true);
 
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+		FUIPositions GetUIPositions() const;
+
 	UFUNCTION(BlueprintCallable)
 		TArray<FLineChain> GetDrawPointsForArcTan(int colX, int colY);
 
@@ -153,13 +170,14 @@ public:
 	// Syntax: Col1, Col2, etc. for column references (Col1 = first column, Col0 = error)
 	// For LST files: data starts at Col5. For TXT files: data starts at Col7.
 	// Operators: +, -, *, /, ^ (power); parentheses for grouping
-	// Constants: Pi, E (Euler's number)
-	// Trig: Sin(x), Cos(x), Tan(x), Arctan(x), Atan(x), Atan2(y,x)
-	// Math: Sqrt(x), Abs(x), Pow(x,y), Exp(x), Log(x), Ln(x), Log10(x), Log2(x)
+	// Constants: Pi, E, Me (electron mass), Mp (proton mass), Qe (charge), Mu0, Eps0
+	// Trig: Sin(x), Cos(x), Tan(x), Arctan(x), Atan2(y,x)
+	// Clock: Clock(By,Bz) - clock angle 0-360 deg or 0-2pi rad
+	// Math: Sqrt(x), Abs(x), Pow(x,y), Ln(x), Log10(x), Log2(x)
 	// Rounding: Floor(x), Ceil(x), Round(x)
 	// Comparison: Min(a,b), Max(a,b), Clamp(value,min,max)
 	// Supports scientific notation: 1.5e-3, 2E+10
-	// Examples: "Col5^2 + Col6^2", "Atan2(Col6, Col5)", "Sin(Pi * Col5)"
+	// Examples: "Col5^2 + Col6^2", "Clock(Col6, Col5)", "Sin(Pi * Col5)"
 	UFUNCTION(BlueprintCallable)
 		TArray<FLineChain> GetDrawPointsForEquation(const FString& equation);
 
@@ -211,7 +229,7 @@ public:
 	// outErrorMessage contains error description if evaluation failed
 	UFUNCTION(BlueprintCallable)
 		static float EvaluateEquationForRow(const FString& equation, const TArray<float>& rowData, 
-			bool& bSuccess, FString& outErrorMessage);
+			bool& bSuccess, FString& outErrorMessage, EAngleMode inAngleMode = EAngleMode::Radians);
 
 	// Converts minutes to time string. Formats:
 	// - DD:HH:MM if days > 0 (e.g., 1563 -> "01:02:03" meaning Day 1, Hour 2, Min 3)
@@ -336,9 +354,9 @@ public:
 		void ClearLegend();
 
 	// Fired whenever the legend changes (entry added/removed/label edited)
-	// Implement in Blueprint to rebuild the legend UI
-	UFUNCTION(BlueprintImplementableEvent)
-		void OnIMFLegendChanged();
+	// Bind to this in Blueprint to rebuild the legend UI
+	UPROPERTY(BlueprintAssignable)
+		FOnIMFLegendChanged OnIMFLegendChanged;
 
 private:
 	// Persisted user labels survive toggle off/on (keyed by column index or equation key)

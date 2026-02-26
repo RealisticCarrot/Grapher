@@ -324,6 +324,7 @@ void AViewer::loadFile() {
 		
 		TArray<AMSPWindow*> mspWindowsToDestroy = windows.mspWindows;
 		windows.mspWindows.Empty();
+		mspWindow = nullptr;
 		
 		TArray<AMSPMarker2*> markersToDestroy = mspMarkers;
 		mspMarkers.Empty();
@@ -375,6 +376,7 @@ void AViewer::loadFile() {
 			if (newWindow)
 			{
 				windows.mspWindows.Add(newWindow);
+				mspWindow = newWindow;
 				newWindow->loadFileAfterConstruction(outName[0]);
 			}
 			else
@@ -507,6 +509,10 @@ void AViewer::loadFile() {
 				{
 					UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to spawn IMF window"));
 					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Failed to create graph window"));
+				}
+				else
+				{
+					OnIMFWindowSpawned();
 				}
 			}
 			else
@@ -683,15 +689,15 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 		PaddingLeft = 160.0f * ScaleX;
 		PaddingBottom = 100.0f * ScaleY;
 		PaddingTop = 120.0f * ScaleY;
-		PaddingRight = 55.0f * ScaleX;
+		PaddingRight = 200.0f * ScaleX;
 	}
 	else
 	{
 		// MSP padding
-		PaddingLeft = 90.0f * ScaleX;
-		PaddingBottom = 100.0f * ScaleY;
+		PaddingLeft = 130.0f * ScaleX;
+		PaddingBottom = 120.0f * ScaleY;
 		PaddingTop = 110.0f * ScaleY;
-		PaddingRight = 130.0f * ScaleX;
+		PaddingRight = 200.0f * ScaleX;
 	}
 
 	float MinX = FMath::Min(BottomLeft.X, TopRight.X);
@@ -881,7 +887,8 @@ float AViewer::AverageColumn(const FString& equation, const FString& startTime, 
 			// Evaluate the equation for this row
 			bool bSuccess = false;
 			FString evalError;
-			float value = AIMFWindow::EvaluateEquationForRow(equation, row.data, bSuccess, evalError);
+			EAngleMode currentAngleMode = (imfWindow != nullptr) ? imfWindow->angleMode : EAngleMode::Radians;
+			float value = AIMFWindow::EvaluateEquationForRow(equation, row.data, bSuccess, evalError, currentAngleMode);
 			
 			if (bSuccess) {
 				sum += value;

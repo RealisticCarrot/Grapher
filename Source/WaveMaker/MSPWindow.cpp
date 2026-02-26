@@ -3,6 +3,8 @@
 
 #include "MSPWindow.h"
 
+#include "Kismet/GameplayStatics.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 
 #include <limits>
 
@@ -890,5 +892,37 @@ float AMSPWindow::GetTimeAtViewFraction(float fraction) const
 	);
 
 	return FMath::Max(peakTimes[timeIndex], 0.0f);
+}
+
+FUIPositions AMSPWindow::GetUIPositions() const
+{
+	FUIPositions Pos;
+
+	FVector origin;
+	FVector extent;
+	GetActorBounds(true, origin, extent);
+
+	float scale = UWidgetLayoutLibrary::GetViewportScale(GetWorld());
+
+	FVector2D bottomLeft, topRight;
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	UGameplayStatics::ProjectWorldToScreen(PC, origin - extent, bottomLeft);
+	UGameplayStatics::ProjectWorldToScreen(PC, origin + extent, topRight);
+
+	bottomLeft /= scale;
+	topRight   /= scale;
+
+	float left   = bottomLeft.X;
+	float right  = topRight.X;
+	float top    = topRight.Y;
+	float bottom = bottomLeft.Y;
+
+	Pos.TitlePosition       = FVector2D((left + right) * 0.5f, top - 30.0f);
+	Pos.LeftLabelPosition   = FVector2D(left - 20.0f, (top + bottom) * 0.5f);
+	Pos.BottomLabelPosition = FVector2D((left + right) * 0.5f, bottom + 45.0f);
+	Pos.LegendPosition      = FVector2D(0.0f, 0.0f);
+	Pos.GraphSize            = FVector2D(right - left, bottom - top);
+
+	return Pos;
 }
 

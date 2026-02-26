@@ -404,6 +404,8 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForArcTan(int colX, int colY) {
 // Expression Parser for custom equations
 // Supports: +, -, *, /, ^(power), parentheses, Col# references
 // Constants: Pi, E (Euler's number ~2.71828)
+// Physics:   Me (electron mass, kg), Mp (proton mass, kg), Qe (elementary charge, C),
+//            Mu0 (permeability of free space, H/m), Eps0 (permittivity of free space, F/m)
 // Scientific notation: 1.5e-3, 2E+10, 3e5
 // 
 // Column References (Col1 = first column, Col0 = error):
@@ -411,9 +413,10 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForArcTan(int colX, int colY) {
 //   TXT files: Col1=Year, Col2=Month, Col3=Day, Col4=Hour, Col5=Min, Col6=Sec, Col7+=Data
 // 
 // Functions:
-//   Trig:       Sin(x), Cos(x), Tan(x), Arctan(x), Atan(x), Atan2(y,x)
-//   Math:       Sqrt(x), Abs(x), Pow(x,y), Exp(x)
-//   Logarithms: Log(x), Ln(x), Log10(x), Log2(x)
+//   Trig:       Sin(x), Cos(x), Tan(x), Arctan(x), Atan2(y,x)
+//   Clock:      Clock(By,Bz) - clock angle from +Z toward +Y, 0-360 deg or 0-2pi rad
+//   Math:       Sqrt(x), Abs(x), Pow(x,y)
+//   Logarithms: Ln(x), Log10(x), Log2(x)
 //   Rounding:   Floor(x), Ceil(x), Round(x)
 //   Comparison: Min(a,b), Max(a,b), Clamp(value,min,max)
 // 
@@ -421,7 +424,8 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForArcTan(int colX, int colY) {
 //   "Col5^2 + Col6^2"                 - sum of squares for LST data (using ^ operator)
 //   "Pow(Col5, 2) + Pow(Col6, 2)"     - sum of squares (using Pow function)
 //   "Atan2(Col6, Col5)"               - angle from two components
-//   "Sin(Pi * Col5 / 180)"            - sine with degree conversion
+//   "Clock(Col6, Col5)"               - IMF clock angle 0-360 (By=Col6, Bz=Col5)
+//   "Sin(Col5)"                        - sine (radians or degrees, per angleMode setting)
 //   "Log10(Abs(Col5) + 1)"            - log scale with offset
 //   "Clamp(Col5, -10, 10)"            - bounded values
 // ============================================================================
@@ -433,9 +437,10 @@ struct FExpressionParser
 	const TArray<float>& RowData;
 	bool bHasError;
 	FString ErrorMsg;
+	bool bDegreeMode;
 	
-	FExpressionParser(const FString& InExpr, const TArray<float>& InRowData)
-		: Expr(InExpr), Pos(0), RowData(InRowData), bHasError(false) {}
+	FExpressionParser(const FString& InExpr, const TArray<float>& InRowData, bool bInDegreeMode = false)
+		: Expr(InExpr), Pos(0), RowData(InRowData), bHasError(false), bDegreeMode(bInDegreeMode) {}
 	
 	void SkipWhitespace()
 	{
@@ -613,6 +618,31 @@ struct FExpressionParser
 		SkipWhitespace();
 		
 		// Try function calls first
+		// Clock(By, Bz) - IMF clock angle (0-360 deg or 0-2pi rad), measured from +Z toward +Y
+		if (!TryMatchFunction(TEXT("Clock")).IsEmpty())
+		{
+			float By = ParseExpression();
+			if (!Match(','))
+			{
+				bHasError = true;
+				ErrorMsg = TEXT("Clock requires two arguments: Clock(By, Bz)");
+				return 0.0f;
+			}
+			float Bz = ParseExpression();
+			if (!Match(')'))
+			{
+				bHasError = true;
+				ErrorMsg = TEXT("Expected closing parenthesis ')' after Clock");
+			}
+			if (By == 0.0f && Bz == 0.0f)
+			{
+				return NAN;
+			}
+			float Theta = FMath::Atan2(By, Bz);
+			if (Theta < 0.0f) Theta += 2.0f * PI;
+			return bDegreeMode ? FMath::RadiansToDegrees(Theta) : Theta;
+		}
+		
 		// Atan2(y, x) - two argument arctangent
 		if (!TryMatchFunction(TEXT("Atan2")).IsEmpty())
 		{
@@ -629,11 +659,12 @@ struct FExpressionParser
 				bHasError = true;
 				ErrorMsg = TEXT("Expected closing parenthesis ')' after Atan2");
 			}
-			return FMath::Atan2(Arg1, Arg2);
+			float Result = FMath::Atan2(Arg1, Arg2);
+			return bDegreeMode ? FMath::RadiansToDegrees(Result) : Result;
 		}
 		
-		// Arctan(x) or Atan(x) - single argument arctangent
-		if (!TryMatchFunction(TEXT("Arctan")).IsEmpty() || !TryMatchFunction(TEXT("Atan")).IsEmpty())
+		// Arctan(x) - single argument arctangent
+		if (!TryMatchFunction(TEXT("Arctan")).IsEmpty())
 		{
 			float Arg = ParseExpression();
 			if (!Match(')'))
@@ -641,7 +672,8 @@ struct FExpressionParser
 				bHasError = true;
 				ErrorMsg = TEXT("Expected closing parenthesis ')' after Arctan");
 			}
-			return FMath::Atan(Arg);
+			float Result = FMath::Atan(Arg);
+			return bDegreeMode ? FMath::RadiansToDegrees(Result) : Result;
 		}
 		
 		// Sqrt(x) - square root
@@ -683,7 +715,7 @@ struct FExpressionParser
 				bHasError = true;
 				ErrorMsg = TEXT("Expected closing parenthesis ')' after Sin");
 			}
-			return FMath::Sin(Arg);
+			return FMath::Sin(bDegreeMode ? FMath::DegreesToRadians(Arg) : Arg);
 		}
 		
 		// Cos(x) - cosine
@@ -695,7 +727,7 @@ struct FExpressionParser
 				bHasError = true;
 				ErrorMsg = TEXT("Expected closing parenthesis ')' after Cos");
 			}
-			return FMath::Cos(Arg);
+			return FMath::Cos(bDegreeMode ? FMath::DegreesToRadians(Arg) : Arg);
 		}
 		
 		// Tan(x) - tangent
@@ -707,7 +739,7 @@ struct FExpressionParser
 				bHasError = true;
 				ErrorMsg = TEXT("Expected closing parenthesis ')' after Tan");
 			}
-			return FMath::Tan(Arg);
+			return FMath::Tan(bDegreeMode ? FMath::DegreesToRadians(Arg) : Arg);
 		}
 		
 		// Pow(x, y) - power function (x^y)
@@ -729,26 +761,14 @@ struct FExpressionParser
 			return FMath::Pow(Base, Exponent);
 		}
 		
-		// Exp(x) - e^x
-		if (!TryMatchFunction(TEXT("Exp")).IsEmpty())
+		// Ln(x) - natural logarithm
+		if (!TryMatchFunction(TEXT("Ln")).IsEmpty())
 		{
 			float Arg = ParseExpression();
 			if (!Match(')'))
 			{
 				bHasError = true;
-				ErrorMsg = TEXT("Expected closing parenthesis ')' after Exp");
-			}
-			return FMath::Exp(Arg);
-		}
-		
-		// Log(x) - natural logarithm (ln)
-		if (!TryMatchFunction(TEXT("Log")).IsEmpty() || !TryMatchFunction(TEXT("Ln")).IsEmpty())
-		{
-			float Arg = ParseExpression();
-			if (!Match(')'))
-			{
-				bHasError = true;
-				ErrorMsg = TEXT("Expected closing parenthesis ')' after Log/Ln");
+				ErrorMsg = TEXT("Expected closing parenthesis ')' after Ln");
 			}
 			if (Arg <= 0.0f)
 			{
@@ -930,21 +950,37 @@ struct FExpressionParser
 		}
 		Pos = SavedPos; // Reset if not a column ref
 		
-		// Try mathematical constants (case-insensitive)
+		// Try constants (case-insensitive, longer names checked first)
 		SkipWhitespace();
-		if (Pos + 2 <= Expr.Len())
+		
+		// Helper: match a constant name (case-insensitive) that isn't part of a longer identifier
+		auto TryMatchConstant = [&](const TCHAR* Name, int32 Len, float Value) -> bool
 		{
-			FString TwoChars = Expr.Mid(Pos, 2);
-			if (TwoChars.Equals(TEXT("Pi"), ESearchCase::IgnoreCase))
+			if (Pos + Len <= Expr.Len())
 			{
-				// Make sure it's not part of a longer identifier
-				if (Pos + 2 >= Expr.Len() || !FChar::IsAlnum(Expr[Pos + 2]))
+				FString Candidate = Expr.Mid(Pos, Len);
+				if (Candidate.Equals(Name, ESearchCase::IgnoreCase))
 				{
-					Pos += 2;
-					return PI;
+					if (Pos + Len >= Expr.Len() || !FChar::IsAlnum(Expr[Pos + Len]))
+					{
+						Pos += Len;
+						return true;
+					}
 				}
 			}
-		}
+			return false;
+		};
+		
+		// Physics constants (SI units: kg, m, s, C, etc.)
+		if (TryMatchConstant(TEXT("Eps0"), 4, 0.0f))  return 8.8541878128e-12f;   // permittivity of free space (F/m)
+		if (TryMatchConstant(TEXT("Mu0"),  3, 0.0f))   return 1.25663706212e-6f;   // permeability of free space (H/m)
+		if (TryMatchConstant(TEXT("Me"),   2, 0.0f))    return 9.1093837015e-31f;   // electron mass (kg)
+		if (TryMatchConstant(TEXT("Mp"),   2, 0.0f))    return 1.67262192369e-27f;  // proton mass (kg)
+		if (TryMatchConstant(TEXT("Qe"),   2, 0.0f))    return 1.602176634e-19f;    // elementary charge (C)
+		
+		// Mathematical constants
+		if (TryMatchConstant(TEXT("Pi"),   2, 0.0f))    return PI;
+		
 		if (Pos + 1 <= Expr.Len())
 		{
 			TCHAR c = Expr[Pos];
@@ -1115,7 +1151,7 @@ TArray<FLineChain> AIMFWindow::GetDrawPointsForEquation(const FString& equation)
 		}
 		
 		// Evaluate the equation for this row
-		FExpressionParser Parser(equation, imfData[i].data);
+		FExpressionParser Parser(equation, imfData[i].data, angleMode == EAngleMode::Degrees);
 		float result = Parser.Evaluate();
 		
 		// Check for parsing errors or invalid results
@@ -1476,7 +1512,7 @@ bool AIMFWindow::IsValidEquation(const FString& equation, FString& outErrorMessa
 	}
 	
 	// Create a test parser with the first row of data to validate the equation
-	FExpressionParser TestParser(equation, imfData[0].data);
+	FExpressionParser TestParser(equation, imfData[0].data, angleMode == EAngleMode::Degrees);
 	float result = TestParser.Evaluate();
 	
 	// Check for parsing errors
@@ -1494,7 +1530,7 @@ bool AIMFWindow::IsValidEquation(const FString& equation, FString& outErrorMessa
 		bool foundValidResult = false;
 		for (int i = 1; i < FMath::Min(10, imfData.Num()); i++)
 		{
-			FExpressionParser RetryParser(equation, imfData[i].data);
+			FExpressionParser RetryParser(equation, imfData[i].data, angleMode == EAngleMode::Degrees);
 			float retryResult = RetryParser.Evaluate();
 			if (!RetryParser.bHasError && !FMath::IsNaN(retryResult) && FMath::IsFinite(retryResult))
 			{
@@ -1514,7 +1550,7 @@ bool AIMFWindow::IsValidEquation(const FString& equation, FString& outErrorMessa
 }
 
 float AIMFWindow::EvaluateEquationForRow(const FString& equation, const TArray<float>& rowData, 
-	bool& bSuccess, FString& outErrorMessage)
+	bool& bSuccess, FString& outErrorMessage, EAngleMode inAngleMode)
 {
 	bSuccess = false;
 	outErrorMessage = TEXT("");
@@ -1531,7 +1567,7 @@ float AIMFWindow::EvaluateEquationForRow(const FString& equation, const TArray<f
 		return 0.0f;
 	}
 	
-	FExpressionParser Parser(equation, rowData);
+	FExpressionParser Parser(equation, rowData, inAngleMode == EAngleMode::Degrees);
 	float result = Parser.Evaluate();
 	
 	if (Parser.bHasError)
@@ -1645,6 +1681,37 @@ void AIMFWindow::GetWindowCornersOnScreen(FVector2D &bottomLeft, FVector2D &topR
 	}
 	
 
+}
+
+FUIPositions AIMFWindow::GetUIPositions() const
+{
+	FUIPositions Pos;
+
+	FVector origin;
+	FVector extent;
+	GetActorBounds(true, origin, extent);
+
+	float scale = UWidgetLayoutLibrary::GetViewportScale(GetWorld());
+
+	FVector2D bottomLeft, topRight;
+	UGameplayStatics::ProjectWorldToScreen(GetWorld()->GetFirstPlayerController(), origin - extent, bottomLeft);
+	UGameplayStatics::ProjectWorldToScreen(GetWorld()->GetFirstPlayerController(), origin + extent, topRight);
+
+	bottomLeft /= scale;
+	topRight /= scale;
+
+	float left   = bottomLeft.X;
+	float right  = topRight.X;
+	float top    = topRight.Y;
+	float bottom = bottomLeft.Y;
+
+	Pos.TitlePosition       = FVector2D((left + right) * 0.5f, top - 30.0f);
+	Pos.LeftLabelPosition   = FVector2D(left - 60.0f, (top + bottom) * 0.5f);
+	Pos.BottomLabelPosition = FVector2D((left + right) * 0.5f, bottom + 50.0f);
+	Pos.LegendPosition      = FVector2D(right + 10.0f, top + 10.0f);
+	Pos.GraphSize            = FVector2D(right - left, bottom - top);
+
+	return Pos;
 }
 
 bool AIMFWindow::GetValueAtMousePosition(float& outTime, float& outValue, FString& outTimeString)
@@ -1887,7 +1954,7 @@ bool AIMFWindow::GetClosestGraphAtMouse(float& outTime, FString& outTimeString, 
 			}
 			
 			// Evaluate the equation for this row
-			FExpressionParser Parser(equation, imfData[i].data);
+			FExpressionParser Parser(equation, imfData[i].data, angleMode == EAngleMode::Degrees);
 			float result = Parser.Evaluate();
 			
 			// Skip invalid results
@@ -2256,7 +2323,7 @@ void AIMFWindow::RegisterLegendEntry(bool bIsEquation, int32 Key, FLinearColor C
 		ColumnLegend.Add(Key, Entry);
 	}
 
-	OnIMFLegendChanged();
+	OnIMFLegendChanged.Broadcast();
 }
 
 void AIMFWindow::UnregisterLegendEntry(bool bIsEquation, int32 Key)
@@ -2270,7 +2337,7 @@ void AIMFWindow::UnregisterLegendEntry(bool bIsEquation, int32 Key)
 		ColumnLegend.Remove(Key);
 	}
 
-	OnIMFLegendChanged();
+	OnIMFLegendChanged.Broadcast();
 }
 
 void AIMFWindow::SetLegendUserLabel(bool bIsEquation, int32 Key, const FString& UserLabel)
@@ -2323,5 +2390,5 @@ void AIMFWindow::ClearLegend()
 	ColumnUserLabels.Empty();
 	EquationUserLabels.Empty();
 
-	OnIMFLegendChanged();
+	OnIMFLegendChanged.Broadcast();
 }

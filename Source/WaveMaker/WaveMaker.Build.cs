@@ -15,111 +15,64 @@ public class WaveMaker : ModuleRules
             "Engine",
             "InputCore",
             "EnhancedInput",
-            "HeadMountedDisplay",
             "SlateCore",
             "Slate",
             "UMG",
-            "HTTP",  // Added for HTTP/curl support
-            "ImageCore",  // For FImageUtils
-            "ImageWrapper"  // For proper PNG export with alpha
+            "HTTP",
+            "ImageCore",
+            "ImageWrapper"
         });
 
-        PrivateDependencyModuleNames.AddRange(new string[] { });
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "ApplicationCore"
+        });
 
-        //
-        // netCDF (Windows) setup - PROJECT LOCAL (packaging-safe)
-        //
-        // Put these folders in your project root (same level as WaveMaker.uproject):
-        //   ThirdParty/netCDF/include
-        //   ThirdParty/netCDF/lib
-        //   ThirdParty/netCDF/bin
-        //
-        // Copy from:
-        //   C:\Program Files\netCDF 4.9.2\include -> ThirdParty\netCDF\include
-        //   C:\Program Files\netCDF 4.9.2\lib     -> ThirdParty\netCDF\lib
-        //   C:\Program Files\netCDF 4.9.2\bin     -> ThirdParty\netCDF\bin
-        //
+        if (Target.Platform != UnrealTargetPlatform.Win64)
+        {
+            throw new BuildException("WaveMaker's bundled netCDF library currently supports Win64 only.");
+        }
+
+        PublicSystemLibraries.Add("comdlg32.lib");
 
         string ProjectDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
         string NetCDFRoot = Path.Combine(ProjectDir, "ThirdParty", "netCDF");
         string NetCDFInclude = Path.Combine(NetCDFRoot, "include");
-        string NetCDFLib = Path.Combine(NetCDFRoot, "lib");
+        string NetCDFLibrary = Path.Combine(NetCDFRoot, "lib", "netcdf.lib");
         string NetCDFBin = Path.Combine(NetCDFRoot, "bin");
 
+        RequireFile(Path.Combine(NetCDFInclude, "netcdf.h"));
+        RequireFile(NetCDFLibrary);
+
         PublicDefinitions.Add("WITH_NetCDFLib=1");
-        PublicIncludePaths.Add(NetCDFInclude);
+        PublicDefinitions.Add("DLL_NETCDF=1");
+        PublicSystemIncludePaths.Add(NetCDFInclude);
+        // netcdf.lib imports the C API; its transitive dependencies are DLLs.
+        PublicAdditionalLibraries.Add(NetCDFLibrary);
+        PublicDelayLoadDLLs.Add("netcdf.dll");
 
-        // Only add netCDF library dependencies if the lib folder exists and has files
-        if (Directory.Exists(NetCDFLib))
-        {
-            // Link libraries (only add if they exist)
-            AddLibraryIfExists(NetCDFLib, "netcdf.lib");
-            AddLibraryIfExists(NetCDFLib, "hdf.lib");
-            AddLibraryIfExists(NetCDFLib, "hdf5.lib");
-            AddLibraryIfExists(NetCDFLib, "hdf5_hl.lib");
-            AddLibraryIfExists(NetCDFLib, "hdf5_tools.lib");
-            AddLibraryIfExists(NetCDFLib, "jpeg.lib");
-            AddLibraryIfExists(NetCDFLib, "libcurl_imp.lib");
-            AddLibraryIfExists(NetCDFLib, "libhdf.lib");
-            AddLibraryIfExists(NetCDFLib, "libhdf5.lib");
-            AddLibraryIfExists(NetCDFLib, "libhdf5_hl.lib");
-            AddLibraryIfExists(NetCDFLib, "libhdf5_tools.lib");
-            AddLibraryIfExists(NetCDFLib, "libmfhdf.lib");
-            AddLibraryIfExists(NetCDFLib, "libxdr.lib");
-            AddLibraryIfExists(NetCDFLib, "mfhdf.lib");
-            AddLibraryIfExists(NetCDFLib, "xdr.lib");
-            AddLibraryIfExists(NetCDFLib, "zlib.lib");
-            AddLibraryIfExists(NetCDFLib, "zlibstatic.lib");
-        }
-
-        // Delay-load DLLs (netCDF related)
-        PublicDelayLoadDLLs.AddRange(new string[]
+        // Stage the bundled netCDF 4.9.2 dependency chain beside the module/executable.
+        // The current Visual C++ runtime is provided by Unreal's prerequisites.
+        foreach (string Dll in new string[]
         {
             "netcdf.dll",
-            "hdf.dll",
-            "hdf5.dll",
             "hdf5_hl.dll",
-            "hdf5_tools.dll",
-            "jpeg.dll",
-            "mfhdf.dll",
-            "xdr.dll",
-            "zlib1.dll",
-        });
-
-        // Stage DLLs from project-local ThirdParty folder to the executable directory (packaging-safe)
-        if (Directory.Exists(NetCDFBin))
+            "hdf5.dll",
+            "libcurl.dll",
+            "zlib1.dll"
+        })
         {
-            // Copy DLLs to the same folder as the executable using $(BinaryOutputDir)
-            AddRuntimeDependencyToBinaries(NetCDFBin, "netcdf.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf5.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf5_hl.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "hdf5_tools.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "jpeg.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "libcurl.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "mfhdf.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "xdr.dll");
-            AddRuntimeDependencyToBinaries(NetCDFBin, "zlib1.dll");
+            string SourcePath = Path.Combine(NetCDFBin, Dll);
+            RequireFile(SourcePath);
+            RuntimeDependencies.Add("$(BinaryOutputDir)/" + Dll, SourcePath, StagedFileType.NonUFS);
         }
     }
 
-    private void AddLibraryIfExists(string directory, string fileName)
+    private static void RequireFile(string FilePath)
     {
-        string fullPath = Path.Combine(directory, fileName);
-        if (File.Exists(fullPath))
+        if (!File.Exists(FilePath))
         {
-            PublicAdditionalLibraries.Add(fullPath);
-        }
-    }
-
-    // Copies a DLL to the same folder as the executable (BinaryOutputDir)
-    private void AddRuntimeDependencyToBinaries(string sourceDirectory, string fileName)
-    {
-        string sourcePath = Path.Combine(sourceDirectory, fileName);
-        if (File.Exists(sourcePath))
-        {
-            // $(BinaryOutputDir) is the folder where the .exe is placed
-            RuntimeDependencies.Add("$(BinaryOutputDir)/" + fileName, sourcePath);
+            throw new BuildException("Required project-local netCDF dependency is missing: {0}", FilePath);
         }
     }
 }

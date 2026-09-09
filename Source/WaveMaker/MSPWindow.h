@@ -8,15 +8,8 @@
 
 
 
-//for dealing with netcdf files
-#include "C:/Program Files/netCDF 4.9.2/include/netcdf.h"
-
-#include "C:/Program Files/netCDF 4.9.2/include/netcdf_aux.h"
-#include "C:/Program Files/netCDF 4.9.2/include/netcdf_dispatch.h"
-#include "C:/Program Files/netCDF 4.9.2/include/netcdf_filter.h"
-//#include "netcdf_filter_build.h"
-#include "C:/Program Files/netCDF 4.9.2/include/netcdf_mem.h"
-#include "C:/Program Files/netCDF 4.9.2/include/netcdf_meta.h"
+// The project-local netCDF include directory is supplied by WaveMaker.Build.cs.
+#include "netcdf.h"
 
 #include "Engine/TextureRenderTarget2D.h"
 

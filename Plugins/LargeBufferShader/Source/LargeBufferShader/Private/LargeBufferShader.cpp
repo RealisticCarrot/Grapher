@@ -3,12 +3,7 @@
 #include "LargeBufferShader.h"
 
 #include "Misc/Paths.h"
-#include "Misc/FileHelper.h"
-#include "RHI.h"
-#include "GlobalShader.h"
-#include "RHICommandList.h"
-#include "RenderGraphBuilder.h"
-#include "Runtime/Core/Public/Modules/ModuleManager.h"
+#include "ShaderCore.h"
 #include "Interfaces/IPluginManager.h"
 
 

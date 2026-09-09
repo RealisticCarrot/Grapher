@@ -1942,7 +1942,7 @@ bool AIMFWindow::GetClosestGraphAtMouse(float& outTime, FString& outTimeString, 
 		
 		// Calculate equation values and convert to screen coordinates directly
 		// Using the same bottomLeft/topRight we got earlier (unscaled)
-		FVector2D prevPoint;
+		FVector2D prevPoint = FVector2D::ZeroVector;
 		bool hasPrevPoint = false;
 		
 		for (int i = 0; i < imfData.Num(); i++)

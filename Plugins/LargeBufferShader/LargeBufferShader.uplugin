@@ -18,11 +18,6 @@
 		{
 			"Name": "LargeBufferShader",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "LargeBufferShader",
-			"Type": "Runtime",
 			"LoadingPhase": "PostConfigInit"
 		}
 	]

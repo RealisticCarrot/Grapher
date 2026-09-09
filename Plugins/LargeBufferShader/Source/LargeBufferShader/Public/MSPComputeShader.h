@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "GenericPlatform/GenericPlatformMisc.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
+#include "RHICommandList.h"
+#include "RenderingThread.h"
 
 #include "MSPComputeShader.generated.h"
 

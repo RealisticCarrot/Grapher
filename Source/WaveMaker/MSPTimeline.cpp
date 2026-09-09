@@ -6,7 +6,7 @@
 #include "MSPWindow.h"
 
 #include "Engine/Texture2D.h"
-#include "C:/Program Files/Epic Games/UE_5.1/Engine/Source/Runtime/Core/Public/HAL/UnrealMemory.h"
+#include "HAL/UnrealMemory.h"
 
 
 
@@ -131,7 +131,7 @@ UTexture2D* AMSPTimeline::CreateTextureFrom32BitFloat(TArray<float> data, int wi
 	texture->NeverStream = true;
 	texture->SRGB = 0;
 	texture->LODGroup = TextureGroup::TEXTUREGROUP_Pixels2D;
-	FTexture2DMipMap& mip = texture->PlatformData->Mips[0];
+	FTexture2DMipMap& mip = texture->GetPlatformData()->Mips[0];
 	void* dataTarget = mip.BulkData.Lock(LOCK_READ_WRITE);
 	FMemory::Memcpy(dataTarget, data.GetData(), width * height * 4);
 	mip.BulkData.Unlock();
@@ -144,7 +144,7 @@ UTexture2D* AMSPTimeline::UpdateTextureFrom32BitFloat(TArray<float> data, int wi
 		return CreateTextureFrom32BitFloat(data, width, height);
 	}
 
-	FTexture2DMipMap& mip = texture->PlatformData->Mips[0];
+	FTexture2DMipMap& mip = texture->GetPlatformData()->Mips[0];
 	void* dataTarget = mip.BulkData.Lock(LOCK_READ_WRITE);
 	FMemory::Memcpy(dataTarget, data.GetData(), width * height * 4);
 	mip.BulkData.Unlock();

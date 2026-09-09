@@ -10,9 +10,10 @@
 #include "MSPLegend.h"
 
 
-//for file selection
-#include "C:\\Program Files\\Epic Games\\UE_5.1\\Engine\\Source\\Developer\\DesktopPlatform\\Public\\IDesktopPlatform.h"
-#include "C:\\Program Files\\Epic Games\\UE_5.1\\Engine\\Source\\Developer\\DesktopPlatform\\Public\\DesktopPlatformModule.h"
+// Native file dialogs are available in packaged Windows builds.
+#include "WaveMakerFileDialogs.h"
+#include "GenericPlatform/GenericWindow.h"
+#include "Widgets/SWindow.h"
 
 
 
@@ -27,7 +28,7 @@
 
 
 #include "Engine/Texture2D.h"
-#include "C:/Program Files/Epic Games/UE_5.1/Engine/Source/Runtime/Core/Public/HAL/UnrealMemory.h"
+#include "HAL/UnrealMemory.h"
 
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialLayersFunctions.h"
@@ -274,21 +275,14 @@ void AViewer::loadFile() {
 
 	void* viewportHandle = NativeWindow->GetOSWindowHandle();
 
-	TArray<FString> outName;
-	
-	//FDesktopPlatformModule module;
-
-	//module.StartupModule();
-
-	IDesktopPlatform* deskPlatform = FDesktopPlatformModule::Get();//module.Get();
-	
-	if (!deskPlatform)
+	FString SelectedFilename;
+	if (!WaveMakerFileDialogs::OpenDataFile(viewportHandle, SelectedFilename))
 	{
-		UE_LOG(LogTemp, Error, TEXT("LoadFile: Could not get desktop platform"));
 		return;
 	}
 
-	deskPlatform->OpenFileDialog(viewportHandle, "Open Data File", "|:/", "file.txt", "MSP Data|*.LY;*.ly|Text Files|*.txt;*.lst", 0, outName);
+	TArray<FString> outName;
+	outName.Add(MoveTemp(SelectedFilename));
 
 	if (outName.Num() > 0) {
 		FString outNameType;
@@ -565,33 +559,13 @@ void AViewer::ExportGraphAsImage()
 	}
 
 	void* ViewportHandle = NativeWindow->GetOSWindowHandle();
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (!DesktopPlatform)
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: Could not get desktop platform"));
-		}
-		return;
-	}
-
-	TArray<FString> SaveFilenames;
-	const bool bSaved = DesktopPlatform->SaveFileDialog(
-		ViewportHandle,
-		TEXT("Export Graph as Image"),
-		TEXT(""),
-		TEXT("graph_export.png"),
-		TEXT("PNG Image|*.png"),
-		0,
-		SaveFilenames
-	);
-
-	if (!bSaved || SaveFilenames.Num() == 0)
+	FString SaveFilename;
+	if (!WaveMakerFileDialogs::SaveGraphImage(ViewportHandle, SaveFilename))
 	{
 		return;
 	}
 
-	PendingSavePath = SaveFilenames[0];
+	PendingSavePath = MoveTemp(SaveFilename);
 
 	UGameViewportClient* GameViewport = GEngine->GameViewport;
 	if (ScreenshotDelegateHandle.IsValid())
@@ -631,30 +605,34 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 		return;
 	}
 
-	FVector2D BottomLeft, TopRight;
+	FVector2D BottomLeft = FVector2D::ZeroVector;
+	FVector2D TopRight = FVector2D::ZeroVector;
 	bool bGotBounds = false;
 	bool bIsIMF = false;
+	AActor* GraphActor = nullptr;
 
 	// Try IMF graph first
-	if (imfWindow)
+	if (IsValid(imfWindow))
 	{
-		imfWindow->GetWindowCornersOnScreen(BottomLeft, TopRight, false);
-		bGotBounds = true;
+		GraphActor = imfWindow;
 		bIsIMF = true;
 	}
 	// Otherwise try MSP window
 	else if (windows.mspWindows.Num() > 0 && windows.mspWindows[0] && IsValid(windows.mspWindows[0]))
 	{
-		APlayerController* PC = GetWorld()->GetFirstPlayerController();
-		if (PC)
-		{
-			FVector BoundOrigin, BoundExtents;
-			windows.mspWindows[0]->GetActorBounds(true, BoundOrigin, BoundExtents);
+		GraphActor = windows.mspWindows[0];
+	}
 
-			PC->ProjectWorldLocationToScreen(BoundOrigin - BoundExtents, BottomLeft);
-			PC->ProjectWorldLocationToScreen(BoundOrigin + BoundExtents, TopRight);
-			bGotBounds = true;
-		}
+	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (GraphActor && PC)
+	{
+		FVector BoundOrigin = FVector::ZeroVector;
+		FVector BoundExtents = FVector::ZeroVector;
+		GraphActor->GetActorBounds(true, BoundOrigin, BoundExtents);
+
+		const bool bBottomLeftProjected = PC->ProjectWorldLocationToScreen(BoundOrigin - BoundExtents, BottomLeft);
+		const bool bTopRightProjected = PC->ProjectWorldLocationToScreen(BoundOrigin + BoundExtents, TopRight);
+		bGotBounds = bBottomLeftProjected && bTopRightProjected && !BottomLeft.ContainsNaN() && !TopRight.ContainsNaN();
 	}
 
 	if (!bGotBounds)

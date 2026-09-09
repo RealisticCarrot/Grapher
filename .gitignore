@@ -74,3 +74,13 @@ Plugins/*/Intermediate/*
 DerivedDataCache/*
 
 Builds/*
+# Generated Unreal/Visual Studio XML solutions
+*.slnx
+
+# Required prebuilt netCDF dependencies used by WaveMaker.Build.cs
+!ThirdParty/netCDF/lib/netcdf.lib
+!ThirdParty/netCDF/bin/netcdf.dll
+!ThirdParty/netCDF/bin/hdf5_hl.dll
+!ThirdParty/netCDF/bin/hdf5.dll
+!ThirdParty/netCDF/bin/libcurl.dll
+!ThirdParty/netCDF/bin/zlib1.dll

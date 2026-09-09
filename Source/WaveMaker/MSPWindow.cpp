@@ -21,7 +21,8 @@
 #include "Engine/Texture2D.h"
 #include "HAL/UnrealMemory.h"
 #include "Misc/Paths.h"
-#include "HAL/PlatformMisc.h"
+#include "Misc/ScopeExit.h"
+#include "WaveMaker.h"
 
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialLayersFunctions.h"
@@ -31,12 +32,7 @@
 
 #include "MSPLegend.h"
 
-// Windows headers for DLL loading check
-#if PLATFORM_WINDOWS
-#include "Windows/AllowWindowsPlatformTypes.h"
-#include <Windows.h>
-#include "Windows/HideWindowsPlatformTypes.h"
-#endif
+
 
 float ncMax;
 float ncMin;
@@ -406,7 +402,11 @@ void AMSPWindow::loadFile(FString fileName) {
 TArray<float> AMSPWindow::fetchMSPdata(FString dataKey) {
 	if (mspValues.Num() > 0 && mspNames.Num() > 0) {
 
-		return mspValues[mspNames[dataKey]].arr;
+		const uint32* DataIndex = mspNames.Find(dataKey);
+		if (DataIndex && mspValues.IsValidIndex(static_cast<int32>(*DataIndex)))
+		{
+			return mspValues[*DataIndex].arr;
+		}
 
 	}
 
@@ -488,7 +488,7 @@ UTexture2D* AMSPWindow::CreateTextureFrom32BitFloat(TArray<float> data, int widt
 	texture->NeverStream = true;
 	texture->SRGB = 0;
 	texture->LODGroup = TextureGroup::TEXTUREGROUP_Pixels2D;
-	FTexture2DMipMap& mip = texture->PlatformData->Mips[0];
+	FTexture2DMipMap& mip = texture->GetPlatformData()->Mips[0];
 	void* dataTarget = mip.BulkData.Lock(LOCK_READ_WRITE);
 	FMemory::Memcpy(dataTarget, data.GetData(), width * height * 4);
 	mip.BulkData.Unlock();
@@ -501,7 +501,7 @@ UTexture2D* AMSPWindow::UpdateTextureFrom32BitFloat(TArray<float> data, int widt
 		return CreateTextureFrom32BitFloat(data, width, height);
 	}
 
-	FTexture2DMipMap& mip = texture->PlatformData->Mips[0];
+	FTexture2DMipMap& mip = texture->GetPlatformData()->Mips[0];
 	void* dataTarget = mip.BulkData.Lock(LOCK_READ_WRITE);
 	FMemory::Memcpy(dataTarget, data.GetData(), width * height * 4);
 	mip.BulkData.Unlock();
@@ -565,54 +565,22 @@ uint32 AMSPWindow::getSizeOfDimVector(TArray<uint32> dimVector, int dimCount) {
 }
 
 
-// Helper function to add netCDF DLL directory to search path and check availability
+// The game module owns the netCDF DLL handle for the lifetime of the application.
 static bool IsNetCDFAvailable()
 {
-#if PLATFORM_WINDOWS
-	// Get the project's ThirdParty/netCDF/bin path
-	FString ProjectDir = FPaths::ProjectDir();
-	FString NetCDFBinPath = FPaths::Combine(ProjectDir, TEXT("ThirdParty"), TEXT("netCDF"), TEXT("bin"));
-	FPaths::NormalizeDirectoryName(NetCDFBinPath);
-	
-	// Convert to absolute path
-	NetCDFBinPath = FPaths::ConvertRelativePathToFull(NetCDFBinPath);
-	
-	// Add the netCDF bin directory to the DLL search path
-	// This allows Windows to find netcdf.dll and its dependencies
-	SetDllDirectoryW(*NetCDFBinPath);
-	
-	// Also try adding to the PATH environment variable as a fallback
-	FString CurrentPath = FPlatformMisc::GetEnvironmentVariable(TEXT("PATH"));
-	FString NewPath = NetCDFBinPath + TEXT(";") + CurrentPath;
-	FPlatformMisc::SetEnvironmentVar(TEXT("PATH"), *NewPath);
-	
-	UE_LOG(LogTemp, Log, TEXT("Added netCDF bin path to DLL search: %s"), *NetCDFBinPath);
-	
-	// Try to load netcdf.dll to check if it's available
-	HMODULE hModule = LoadLibraryW(*FPaths::Combine(NetCDFBinPath, TEXT("netcdf.dll")));
-	if (hModule != nullptr)
-	{
-		FreeLibrary(hModule);
-		return true;
-	}
-	
-	// Also try loading from standard paths (in case it's installed system-wide)
-	hModule = LoadLibraryA("netcdf.dll");
-	if (hModule != nullptr)
-	{
-		FreeLibrary(hModule);
-		return true;
-	}
-	
-	return false;
-#else
-	// On non-Windows platforms, assume it's available if we got this far
-	return true;
-#endif
+	const FnetcdfModule* NetCDFModule = FModuleManager::GetModulePtr<FnetcdfModule>(TEXT("WaveMaker"));
+	return NetCDFModule && NetCDFModule->IsAvailable();
 }
 
 
 void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& refNames, TArray<FloatTArray>& refValues, TArray<uint32>& refSizes) {
+	refNames.Empty();
+	refValues.Empty();
+	refSizes.Empty();
+	ncTimeSteps = 0.0f;
+	ncTimeStepSize = 0.0f;
+	mspProperties.dataLength = 0.0f;
+	mspProperties.timeStepSize = 0.0f;
 
 	// Check if netCDF library is available before attempting to use it
 	if (!IsNetCDFAvailable())
@@ -636,20 +604,42 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 
 	//print("mspProcedure running");
 
-	int netcdfID;
+	int netcdfID = -1;
 
 
-	nc_open(TCHAR_TO_ANSI(*filename), NC_SHARE, &netcdfID);
+	int status = nc_open(TCHAR_TO_ANSI(*filename), NC_SHARE, &netcdfID);
+	if (status != NC_NOERR)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Could not open MSP file %s: %s"), *filename, ANSI_TO_TCHAR(nc_strerror(status)));
+		return;
+	}
 
-	int ndims;
+	bool bParsingSucceeded = false;
+	ON_SCOPE_EXIT
+	{
+		nc_close(netcdfID);
+		if (!bParsingSucceeded)
+		{
+			refNames.Empty();
+			refValues.Empty();
+			refSizes.Empty();
+		}
+	};
 
-	int nvars;
+	int ndims = 0;
 
-	int natts;
+	int nvars = 0;
 
-	int nunlimdim;
+	int natts = 0;
 
-	nc_inq(netcdfID, &ndims, &nvars, &natts, &nunlimdim);
+	int nunlimdim = -1;
+
+	status = nc_inq(netcdfID, &ndims, &nvars, &natts, &nunlimdim);
+	if (status != NC_NOERR || ndims < 0 || nvars < 0 || natts < 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Could not read MSP file metadata: %s"), ANSI_TO_TCHAR(nc_strerror(status)));
+		return;
+	}
 
 	
 
@@ -666,11 +656,23 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 	TArray<FncAttribute> attribs;
 	attribs.SetNum(natts);
 
-	const char* charholder = new char[128];
 	//print("lengths");
 	for (int i = 0; i < natts; i++) {
 
-		nc_inq_att(netcdfID, i, attribs[i].name, &attribs[i].type, (size_t*)&attribs[i].length);
+		char attributeName[NC_MAX_NAME + 1] = {};
+		size_t attributeLength = 0;
+		status = nc_inq_attname(netcdfID, NC_GLOBAL, i, attributeName);
+		if (status == NC_NOERR)
+		{
+			status = nc_inq_att(netcdfID, NC_GLOBAL, attributeName, &attribs[i].type, &attributeLength);
+		}
+		if (status != NC_NOERR || attributeLength > MAX_uint32 || strlen(attributeName) >= sizeof(attribs[i].name))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Invalid or unsupported MSP global attribute %d (netCDF status %d)"), i, status);
+			return;
+		}
+		FCStringAnsi::Strncpy(attribs[i].name, attributeName, UE_ARRAY_COUNT(attribs[i].name));
+		attribs[i].length = static_cast<uint32>(attributeLength);
 
 
 		
@@ -680,7 +682,6 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 		//print(std::to_string(attribs[i].length));
 	}
 
-	delete[] charholder;
 
 	//get all of the global dimensions
 
@@ -689,8 +690,17 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 	dimensions.SetNum(ndims);
 
 	for (int i = 0; i < ndims; i++) {
-		nc_inq_dim(netcdfID, i, dimensions[i].name, (size_t*)&dimensions[i].length);
-		UE_LOG(LogTemp, Warning, TEXT("dim %s, len %d"), ANSI_TO_TCHAR(dimensions[i].name), dimensions[i].length);
+		char dimensionName[NC_MAX_NAME + 1] = {};
+		size_t dimensionLength = 0;
+		status = nc_inq_dim(netcdfID, i, dimensionName, &dimensionLength);
+		if (status != NC_NOERR || dimensionLength > MAX_uint32 || strlen(dimensionName) >= sizeof(dimensions[i].name))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Invalid or unsupported MSP dimension %d (netCDF status %d)"), i, status);
+			return;
+		}
+		FCStringAnsi::Strncpy(dimensions[i].name, dimensionName, UE_ARRAY_COUNT(dimensions[i].name));
+		dimensions[i].length = static_cast<uint32>(dimensionLength);
+		UE_LOG(LogTemp, Warning, TEXT("dim %s, len %u"), ANSI_TO_TCHAR(dimensions[i].name), dimensions[i].length);
 
 
 		
@@ -710,9 +720,22 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 		variables[i].id = i;
 
 		TArray<int> tempDimIds;
-		tempDimIds.SetNum(ndims);
+		status = nc_inq_varndims(netcdfID, i, &variables[i].dimCount);
+		if (status != NC_NOERR || variables[i].dimCount < 0 || variables[i].dimCount > NC_MAX_VAR_DIMS)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Invalid MSP variable dimensions for variable %d (netCDF status %d)"), i, status);
+			return;
+		}
+		tempDimIds.SetNum(variables[i].dimCount);
 
-		nc_inq_var(netcdfID, i, variables[i].name, &variables[i].type, &variables[i].dimCount, tempDimIds.GetData(), &variables[i].attCount);
+		char variableName[NC_MAX_NAME + 1] = {};
+		status = nc_inq_var(netcdfID, i, variableName, &variables[i].type, nullptr, tempDimIds.GetData(), &variables[i].attCount);
+		if (status != NC_NOERR || strlen(variableName) >= sizeof(variables[i].name))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Invalid or unsupported MSP variable %d (netCDF status %d)"), i, status);
+			return;
+		}
+		FCStringAnsi::Strncpy(variables[i].name, variableName, UE_ARRAY_COUNT(variables[i].name));
 
 		UE_LOG(LogTemp, Warning, TEXT("var %s"), ANSI_TO_TCHAR(variables[i].name));
 
@@ -747,21 +770,6 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 
 	}
 
-	int testVar = 2;
-
-
-	//print("here");
-
-	//print(FString(variables[testVar].name));
-
-	//print(std::to_string(variables[testVar].dimCount));
-
-	//print(std::to_string(variables[testVar].dimIds[0]));
-
-	for (int i = 0; i < variables[testVar].dimCount; i++) {
-		//print(FString(dimensions[variables[testVar].dimIds[i]].name));
-
-	}
 
 
 
@@ -777,27 +785,45 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 		//get base data
 
 
-		float* tempData = new float[getSizeOfDimVector(getDimensionVector(variables[i].dimIds, variables[i].dimCount, dimensions), variables[i].dimCount)];
+		uint64 elementCount = 1; // A scalar variable has one value and no dimensions.
+		for (int dimensionId : variables[i].dimIds)
+		{
+			if (!dimensions.IsValidIndex(dimensionId))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Invalid dimension ID in MSP variable %s"), ANSI_TO_TCHAR(variables[i].name));
+				return;
+			}
+			elementCount *= dimensions[dimensionId].length;
+			// refSizes stores bytes in uint32; TArray stores the element count in int32.
+			if (elementCount > MAX_int32 || elementCount > MAX_uint32 / sizeof(float))
+			{
+				UE_LOG(LogTemp, Error, TEXT("MSP variable %s is too large to load"), ANSI_TO_TCHAR(variables[i].name));
+				return;
+			}
+		}
 
-
-
-		tempData2.Empty();
-		tempData2.SetNum(getSizeOfDimVector(getDimensionVector(variables[i].dimIds, variables[i].dimCount, dimensions), variables[i].dimCount));
-
-		nc_get_var_float(netcdfID, variables[i].id, &tempData2[0]);
+		tempData2.SetNum(static_cast<int32>(elementCount));
+		if (elementCount > 0)
+		{
+			status = nc_get_var_float(netcdfID, variables[i].id, tempData2.GetData());
+			if (status != NC_NOERR)
+			{
+				UE_LOG(LogTemp, Error, TEXT("Could not read MSP variable %s: %s"), ANSI_TO_TCHAR(variables[i].name), ANSI_TO_TCHAR(nc_strerror(status)));
+				return;
+			}
+		}
 
 		//must append like this because its a 2d array/struct
 		refValues.SetNum(refValues.Num() + 1);
 		refValues.Last().arr = tempData2;
 
 		// append doesn't work here for some reason
-		size_t a = getSizeOfDimVector(getDimensionVector(variables[i].dimIds, variables[i].dimCount, dimensions), variables[i].dimCount) * (size_t)sizeof(float);
+		uint32 a = static_cast<uint32>(elementCount * sizeof(float));
 		refSizes.SetNum(refSizes.Num() + 1);
 		refSizes.Last() = a;
 
 		refNames.Add(variables[i].name, i);
 
-		delete[] tempData;
 	}
 
 
@@ -807,21 +833,25 @@ void AMSPWindow::mspParsingProcedure(FString filename, TMap<FString, uint32>& re
 	//print("data size");
 	//print(std::to_string(refSizes[0]));
 
-	ncTimeSteps = refValues[0].arr.Num();
-	ncTimeStepSize = refValues[0][1] - refValues[0][0];
-
-
-
-
-	for (int i = 0; i < fminf(refSizes[0], static_cast<size_t>(1000)); i++) {
-		//print(std::to_string(refValues[0][i]));
+	const uint32* timeIndex = refNames.Find(TEXT("Time"));
+	if (!timeIndex || !refValues.IsValidIndex(static_cast<int32>(*timeIndex)) || refValues[*timeIndex].arr.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("No Time data found in MSP file"));
+		return;
 	}
+	const TArray<float>& timeValues = refValues[*timeIndex].arr;
+	ncTimeSteps = timeValues.Num();
+	ncTimeStepSize = timeValues.Num() >= 2 ? timeValues[1] - timeValues[0] : 0.0f;
+
+
+
+
 
 	mspProperties.dataLength = ncTimeSteps;
 	mspProperties.timeStepSize = ncTimeStepSize;
 
 
-	nc_close(netcdfID);
+	bParsingSucceeded = true;
 }
 
 

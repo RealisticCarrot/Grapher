@@ -5,9 +5,6 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-#include "RenderGraphResources.h"
-#include "Runtime/Engine/Classes/Engine/TextureRenderTarget2D.h"
-
 class FLargeBufferShaderModule : public IModuleInterface
 {
 public:

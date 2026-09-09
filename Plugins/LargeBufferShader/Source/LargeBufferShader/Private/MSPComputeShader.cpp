@@ -1,18 +1,10 @@
 #include "MSPComputeShader.h"
-#include "LargeBufferShader/Public/MSPComputeShader.h"
-#include "PixelShaderUtils.h"
-#include "RenderCore/Public/RenderGraphUtils.h"
-#include "MeshPassProcessor.inl"
-#include "StaticMeshResources.h"
-#include "DynamicMeshBuilder.h"
-#include "RenderGraphResources.h"
-#include "GlobalShader.h"
-#include "UnifiedBuffer.h"
-#include "CanvasTypes.h"
-#include "MaterialShader.h"
+#include "Async/Async.h"
+#include "RHIGPUReadback.h"
 
 DECLARE_STATS_GROUP(TEXT("MSPComputeShader"), STATGROUP_MSPComputeShader, STATCAT_Advanced);
 DECLARE_CYCLE_STAT(TEXT("MSPComputeShader Execute"), STAT_MSPComputeShader_Execute, STATGROUP_MSPComputeShader);
+DECLARE_GPU_STAT(MSPComputeShader);
 
 // This class carries our parameter declarations and acts as the bridge between cpp and HLSL.
 class LARGEBUFFERSHADER_API FMSPComputeShader : public FGlobalShader
@@ -102,9 +94,7 @@ void FMSPComputeShaderInterface::DispatchRenderThread(FRHICommandListImmediate& 
 
 	{
 		SCOPE_CYCLE_COUNTER(STAT_MSPComputeShader_Execute);
-		DECLARE_GPU_STAT(MSPComputeShader)
-			RDG_EVENT_SCOPE(GraphBuilder, "MSPComputeShader");
-		RDG_GPU_STAT_SCOPE(GraphBuilder, MSPComputeShader);
+		RDG_EVENT_SCOPE_STAT(GraphBuilder, MSPComputeShader, "MSPComputeShader");
 
 		typename FMSPComputeShader::FPermutationDomain PermutationVector;
 
@@ -139,7 +129,7 @@ void FMSPComputeShaderInterface::DispatchRenderThread(FRHICommandListImmediate& 
 				RDG_EVENT_NAME("ExecuteMSPComputeShader"),
 				PassParameters,
 				ERDGPassFlags::AsyncCompute,
-				[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+				[PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
 				{
 					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
 				});
@@ -151,7 +141,7 @@ void FMSPComputeShaderInterface::DispatchRenderThread(FRHICommandListImmediate& 
 			auto RunnerFunc = [GPUBufferReadback, AsyncCallback](auto&& RunnerFunc) -> void {
 				if (GPUBufferReadback->IsReady()) {
 
-					int32* Buffer = (int32*)GPUBufferReadback->Lock(1);
+					int32* Buffer = (int32*)GPUBufferReadback->Lock(sizeof(int32));
 					int OutVal = Buffer[0];
 
 					GPUBufferReadback->Unlock();

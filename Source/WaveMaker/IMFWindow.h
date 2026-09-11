@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "structs.h"
+#include "Blueprint/UserWidget.h"
+#include "IMFImport.h"
 #include "IMFWindow.generated.h"
 
 struct FRow;
@@ -51,6 +53,16 @@ public:
 
 	UPROPERTY(BlueprintReadWrite)
 		FString UserLabel;
+};
+
+struct FIMFPlotSeries
+{
+    bool bEquation = false;
+    int32 Key = 0;
+    FString Expression;
+    FColor Color = FColor::White;
+    TArray<FLineChain> Values;
+    TArray<FLineChain> Screen;
 };
 
 UCLASS()
@@ -233,7 +245,7 @@ public:
 
 	// Converts minutes to time string. Formats:
 	// - DD:HH:MM if days > 0 (e.g., 1563 -> "01:02:03" meaning Day 1, Hour 2, Min 3)
-	// - HH:MM if days = 0 (e.g., 123 -> "02:03" meaning Hour 2, Min 3)
+	// - HH:MM if days = 0; DD:HH:MM:SS when seconds are present (unambiguous).
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 		static FString MinutesToTimeString(float minutes);
 
@@ -358,8 +370,47 @@ public:
 	UPROPERTY(BlueprintAssignable)
 		FOnIMFLegendChanged OnIMFLegendChanged;
 
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    void RefreshPlot();
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    void SetColumnVisible(int32 Column, bool bVisible, FColor Color);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    void SetEquationVisible(int32 Key, bool bVisible, FColor Color);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    int32 AddEquationFromText(FText Text);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    void ApplyAxisText(FName Axis, FText Text);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    void PaintGraph(UPARAM(ref) FPaintContext& Context);
+    UFUNCTION(BlueprintPure, Category="IMF Fixes")
+    FString GetColumnDisplayName(int32 Column) const;
+    UFUNCTION(BlueprintPure, Category="IMF Fixes")
+    static bool IsClockExpression(const FString& Expression);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    static TArray<FLineChain> MakeValueSegments(const TArray<FRow>& Rows, const FString& Expression, EAngleMode Mode, double GapSeconds, bool bBreakClockWrap);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    FString PositionTimeAxisLabel(UUserWidget* LabelWidget, int32 Index, int32 Count);
+    FString FormatGraphTime(double Minutes) const;
+    TArray<FLineChain> ProjectSegments(const TArray<FLineChain>& Values) const;
+    const TArray<FIMFPlotSeries>& GetPlotSeries() const { return PlotSeries; }
+    void EnsurePlotCurrent();
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+    FDateTime TimeOrigin;
+    FString SourceDescription;
+    TArray<FIMFColumnInfo> ColumnInfo;
+    double MaxGapSeconds = 0;
+
 private:
-	// Persisted user labels survive toggle off/on (keyed by column index or equation key)
+	TMap<int32, FString> EquationDefinitions;
+    TArray<FIMFPlotSeries> PlotSeries;
+    UPROPERTY(Transient) TArray<TObjectPtr<UUserWidget>> OwnedWidgets;
+    int32 NextEquationKey = 1;
+    bool bPlotDirty = true;
+    FVector2D LastBottomLeft = FVector2D::ZeroVector, LastTopRight = FVector2D::ZeroVector;
+    FVector4 LastRanges = FVector4(0,0,0,0);
+    EAngleMode LastAngleMode = EAngleMode::Radians;
+    bool LastGridVisible = false;
+    // Persisted user labels survive toggle off/on (keyed by column index or equation key)
 	TMap<int32, FString> ColumnUserLabels;
 	TMap<int32, FString> EquationUserLabels;
 };

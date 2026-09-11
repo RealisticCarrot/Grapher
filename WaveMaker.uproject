@@ -32,6 +32,14 @@
 		{
 			"Name": "DatasmithContent",
 			"Enabled": false
+		},
+		{
+			"Name": "ModelContextProtocol",
+			"Enabled": true
+		},
+		{
+			"Name": "AllToolsets",
+			"Enabled": true
 		}
 	]
 }

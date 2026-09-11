@@ -1,0 +1,104 @@
+{
+  "year": 1,
+  "doy": 0,
+  "month": 2,
+  "day": 3,
+  "hour": 4,
+  "minute": 5,
+  "second": 6,
+  "skipLines": -1,
+  "gapSeconds": 15,
+  "source": "image_20160113_2.txt; data labels/units/frame unassigned",
+  "columns": [
+    {
+      "label": "Year",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Month",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Day",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Hour",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Minute",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Second",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col7",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col8",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col9",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col10",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col11",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col12",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col13",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col14",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col15",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    }
+  ]
+}

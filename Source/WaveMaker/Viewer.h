@@ -31,6 +31,7 @@ class AMSPMarker2;
 
 
 class AIMFWindow;
+struct FIMFImportResult;
 
 
 
@@ -61,7 +62,7 @@ struct FRow
 public:
 
 	UPROPERTY(BlueprintReadWrite)
-		float timeMinutes = 0.0f;
+		double timeMinutes = 0.0;
 
 	UPROPERTY(BlueprintReadWrite)
 		TArray<FString> stringData;
@@ -292,8 +293,22 @@ public:
 	UFUNCTION(BlueprintImplementableEvent)
 		void OnAfterExportScreenshot();
 
+    TSharedPtr<FIMFImportResult> CurrentIMFImport;
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    bool LoadIMFFile(const FString& Filename, bool bShowPreview, FString& Error);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    float AverageWithMode(const FString& Equation, const FString& Start, const FString& End, bool bCircular, FString& Error);
+    UFUNCTION(BlueprintCallable, Category="IMF Fixes")
+    void ShowAverageOptions(UUserWidget* Menu);
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+
 private:
-	// One-shot callback when viewport screenshot is captured (used by ExportGraphAsImage)
+	void ResetLoadedWindows();
+    bool bExportInProgress = false;
+    bool bRestoreScreenshotUI = false;
+    FTimerHandle ExportTimer;
+    void WriteGraphPNG(TArray<FColor> Pixels, int32 Width, int32 Height, FString Path);
+    // One-shot callback when viewport screenshot is captured (used by ExportGraphAsImage)
 	void OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor>& Colors);
 
 	// Path chosen in Save File Dialog; used in OnScreenshotCaptured

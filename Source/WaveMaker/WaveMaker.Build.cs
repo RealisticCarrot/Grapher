@@ -20,7 +20,10 @@ public class WaveMaker : ModuleRules
             "UMG",
             "HTTP",
             "ImageCore",
-            "ImageWrapper"
+            "ImageWrapper",
+            "Json",
+            "RenderCore",
+            "RHI"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

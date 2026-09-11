@@ -2,6 +2,9 @@
 
 
 #include "Viewer.h"
+#include "IMFImport.h"
+#include "IMFExport.h"
+#include "Misc/MessageDialog.h"
 
 #include "MSPWindow.h"
 
@@ -305,6 +308,55 @@ void AViewer::loadFile() {
 		}
 		// ======================================================
 		
+        if (outNameType == "txt" || outNameType == "lst")
+        {
+            FString Error;
+            if (!LoadIMFFile(outName[0], true, Error) && !Error.IsEmpty()) FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Error));
+            return;
+        }
+        ResetLoadedWindows();
+
+		if (outNameType == "ly") {
+			//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, "MSP Data File Targeted");
+
+			FActorSpawnParameters params;
+			//params.Template = mspWindow;
+			
+			// Check if MSP window class is set
+			if (!mspWindowClass)
+			{
+				UE_LOG(LogTemp, Error, TEXT("LoadFile: MSP Window Class is not set in Blueprint"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("MSP Window Class is not configured"));
+				return;
+			}
+
+			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 0.0f), (GetActorUpVector()).ToOrientationRotator(), params);
+			if (newWindow)
+			{
+				windows.mspWindows.Add(newWindow);
+				mspWindow = newWindow;
+				newWindow->loadFileAfterConstruction(outName[0]);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to spawn MSP window"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Failed to create MSP window"));
+			}
+			
+			
+
+
+
+
+		}
+
+
+
+	}
+}
+
+void AViewer::ResetLoadedWindows()
+{
 		// ========== RESET ALL WINDOWS BEFORE LOADING NEW FILE ==========
 		// Call Blueprint event FIRST so it can clear any cached references
 		OnBeforeReset();
@@ -352,174 +404,11 @@ void AViewer::loadFile() {
 		}
 		// ================================================================
 
-		if (outNameType == "ly") {
-			//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, "MSP Data File Targeted");
-
-			FActorSpawnParameters params;
-			//params.Template = mspWindow;
-			
-			// Check if MSP window class is set
-			if (!mspWindowClass)
-			{
-				UE_LOG(LogTemp, Error, TEXT("LoadFile: MSP Window Class is not set in Blueprint"));
-				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("MSP Window Class is not configured"));
-				return;
-			}
-
-			AMSPWindow* newWindow = GetWorld()->SpawnActor<AMSPWindow>(mspWindowClass, GetActorLocation() + FVector(200.0f, 0.0f, 0.0f), (GetActorUpVector()).ToOrientationRotator(), params);
-			if (newWindow)
-			{
-				windows.mspWindows.Add(newWindow);
-				mspWindow = newWindow;
-				newWindow->loadFileAfterConstruction(outName[0]);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to spawn MSP window"));
-				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Failed to create MSP window"));
-			}
-			
-			
-
-
-
-
-		}
-
-
-		else if (outNameType == "txt" || outNameType == "lst") {
-			
-			TArray<FString> dataText;
-			if (!FFileHelper::LoadFileToStringArray(dataText, *outName[0]))
-			{
-				UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to load file: %s"), *outName[0]);
-				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, FString::Printf(TEXT("Failed to load file: %s"), *outName[0]));
-				return;
-			}
-			
-			// Check if file is empty
-			if (dataText.Num() == 0)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("LoadFile: File is empty: %s"), *outName[0]);
-				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("File is empty"));
-				return;
-			}
-
-			// Determine file format based on extension
-			bool isTxtFormat = (outNameType.ToLower() == "txt");
-			
-			if (isTxtFormat) {
-				currentFileFormat = EDataFileFormat::TXT;
-				dataColumnOffset = 6;  // TXT: Year Month Day Hour Min Sec [data...]
-			} else {
-				currentFileFormat = EDataFileFormat::LST;
-				dataColumnOffset = 4;  // LST: Year DayOfYear Hour Min [data...]
-			}
-
-			// Starting index - skip header row for TXT files
-			int startIndex = isTxtFormat ? 1 : 0;
-
-			for (int i = startIndex; i < dataText.Num(); i++) {
-				FString leftStr;
-				FString rightStr;
-
-				dataText[i].Split(" ", &leftStr, &rightStr);
-
-				//GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, "Left:" + leftStr + "|Right:" + rightStr);
-				
-				imfData.Add(GetRow(dataText[i]));
-			}
-
-			// Calculate time based on file format
-			if (imfData.Num() > 0)
-			{
-				if (isTxtFormat) {
-					// TXT format: Year Month Day Hour Minute Second
-					// Columns: 0=Year, 1=Month, 2=Day, 3=Hour, 4=Minute, 5=Second
-					if (imfData[0].data.Num() > 5)
-					{
-						float baseYear = imfData[0].data[0];
-						float baseMonth = imfData[0].data[1];
-						float baseDay = imfData[0].data[2];
-						
-						for (int i = 0; i < imfData.Num(); i++)
-						{
-							if (imfData[i].data.Num() > 5)
-							{
-								float currentYear = imfData[i].data[0];
-								float currentMonth = imfData[i].data[1];
-								float currentDay = imfData[i].data[2];
-								float hour = imfData[i].data[3];
-								float minute = imfData[i].data[4];
-								float second = imfData[i].data[5];
-								
-								// Calculate approximate day offset (using 30 days per month average)
-								float yearOffsetDays = (currentYear - baseYear) * 365.0f;
-								float monthOffsetDays = (currentMonth - baseMonth) * 30.0f;
-								float dayOffset = currentDay - baseDay;
-								float totalDayOffset = yearOffsetDays + monthOffsetDays + dayOffset;
-								
-								// Convert to minutes: (days * 1440) + (hours * 60) + minutes + (seconds / 60)
-								imfData[i].timeMinutes = (totalDayOffset * 1440.0f) + (hour * 60.0f) + minute + (second / 60.0f);
-							}
-						}
-					}
-				}
-				else {
-					// LST format: Year DayOfYear Hour Minute
-					// Columns: 0=Year, 1=DayOfYear, 2=Hour, 3=Minute
-					if (imfData[0].data.Num() > 3)
-					{
-						float baseYear = imfData[0].data[0];
-						float baseDay = imfData[0].data[1];
-						
-						for (int i = 0; i < imfData.Num(); i++)
-						{
-							if (imfData[i].data.Num() > 3)
-							{
-								float currentYear = imfData[i].data[0];
-								float currentDay = imfData[i].data[1];
-								float hour = imfData[i].data[2];
-								float minute = imfData[i].data[3];
-								
-								// Calculate year offset in days (using 365 days per year)
-								float yearOffsetDays = (currentYear - baseYear) * 365.0f;
-								float dayOffset = currentDay - baseDay;
-								float totalDayOffset = yearOffsetDays + dayOffset;
-								
-								// Convert to minutes: (days * 1440) + (hours * 60) + minutes
-								imfData[i].timeMinutes = (totalDayOffset * 1440.0f) + (hour * 60.0f) + minute;
-							}
-						}
-					}
-				}
-			}
-
-			// Spawn the IMF window if the class is set
-			if (imfWindowClass)
-			{
-				imfWindow = GetWorld()->SpawnActor<AIMFWindow>(imfWindowClass);
-				if (!imfWindow)
-				{
-					UE_LOG(LogTemp, Error, TEXT("LoadFile: Failed to spawn IMF window"));
-					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Failed to create graph window"));
-				}
-				else
-				{
-					OnIMFWindowSpawned();
-				}
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("LoadFile: IMF Window Class is not set in Blueprint"));
-				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("IMF Window Class is not configured"));
-			}
-		}
-	}
 }
 
 void AViewer::ExportGraphAsImage()
 {
+    if (bExportInProgress) return;
 	if (!imfWindow && windows.mspWindows.Num() == 0)
 	{
 		if (GEngine)
@@ -565,7 +454,18 @@ void AViewer::ExportGraphAsImage()
 		return;
 	}
 
-	PendingSavePath = MoveTemp(SaveFilename);
+    if (imfWindow)
+    {
+        TArray<FColor> Pixels; int32 Width = 0, Height = 0; FString Error;
+        imfWindow->EnsurePlotCurrent();
+        if (!IMFExport::Capture(imfWindow, menuWidget, exportResolutionMultiplier, Pixels, Width, Height, Error))
+        { FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Error)); return; }
+        bExportInProgress = true;
+        WriteGraphPNG(MoveTemp(Pixels), Width, Height, SaveFilename);
+        return;
+    }
+    bExportInProgress = true;
+    PendingSavePath = MoveTemp(SaveFilename);
 
 	UGameViewportClient* GameViewport = GEngine->GameViewport;
 	if (ScreenshotDelegateHandle.IsValid())
@@ -576,11 +476,11 @@ void AViewer::ExportGraphAsImage()
 	ScreenshotDelegateHandle = GameViewport->OnScreenshotCaptured().AddUObject(this, &AViewer::OnScreenshotCaptured);
 
 	// Let Blueprint hide any widgets that shouldn't appear in the export
+    bRestoreScreenshotUI = true;
 	OnBeforeExportScreenshot();
 
 	// Delay the screenshot by 2 frames so widget visibility changes take effect
-	FTimerHandle TimerHandle;
-	GetWorldTimerManager().SetTimer(TimerHandle, FTimerDelegate::CreateLambda([this]()
+	GetWorldTimerManager().SetTimer(ExportTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
 		FScreenshotRequest::RequestScreenshot(true);
 	}), 0.05f, false);
@@ -602,6 +502,7 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Export Graph: No save path"));
 		}
 		OnAfterExportScreenshot();
+        bExportInProgress = false;
 		return;
 	}
 
@@ -643,6 +544,7 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 		}
 		PendingSavePath.Empty();
 		OnAfterExportScreenshot();
+        bExportInProgress = false;
 		return;
 	}
 
@@ -696,6 +598,7 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 		}
 		PendingSavePath.Empty();
 		OnAfterExportScreenshot();
+        bExportInProgress = false;
 		return;
 	}
 
@@ -720,191 +623,23 @@ void AViewer::OnScreenshotCaptured(int32 SizeX, int32 SizeY, const TArray<FColor
 	FString SavePath = PendingSavePath;
 	PendingSavePath.Empty();
 
-	Async(EAsyncExecution::ThreadPool,
-		[this, PixelData = MoveTemp(CroppedPixels), CropWidth, CropHeight, SavePath]() mutable
-	{
-		bool bSuccess = false;
-		FString ErrorMsg;
-
-		// PNG encode on background thread
-		IImageWrapperModule& ImageWrapperModule =
-			FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
-		TSharedPtr<IImageWrapper> ImageWrapper =
-			ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
-
-		if (!ImageWrapper.IsValid())
-		{
-			ErrorMsg = TEXT("Export Graph: Failed to create PNG encoder");
-		}
-		else if (!ImageWrapper->SetRaw(PixelData.GetData(), PixelData.Num() * sizeof(FColor),
-			CropWidth, CropHeight, ERGBFormat::BGRA, 8))
-		{
-			ErrorMsg = TEXT("Export Graph: Failed to set raw image data");
-		}
-		else
-		{
-			// Quality 0 = fastest PNG compression (still lossless — PNG is always lossless)
-			const TArray64<uint8>& CompressedData = ImageWrapper->GetCompressed(0);
-			if (CompressedData.Num() == 0)
-			{
-				ErrorMsg = TEXT("Export Graph: Failed to compress PNG");
-			}
-			else
-			{
-				// Write directly from TArray64 to avoid extra copy
-				FArchive* Ar = IFileManager::Get().CreateFileWriter(*SavePath);
-				if (Ar)
-				{
-					Ar->Serialize(const_cast<uint8*>(CompressedData.GetData()), CompressedData.Num());
-					Ar->Close();
-					delete Ar;
-					bSuccess = true;
-				}
-				else
-				{
-					ErrorMsg = FString::Printf(TEXT("Export Graph: Failed to save to %s"), *SavePath);
-				}
-			}
-		}
-
-		// Free pixel data now that encoding is done (before returning to game thread)
-		PixelData.Empty();
-
-		// Return to game thread for UI updates and Blueprint event
-		AsyncTask(ENamedThreads::GameThread, [this, bSuccess, ErrorMsg, SavePath]()
-		{
-			if (GEngine)
-			{
-				if (bSuccess)
-				{
-					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-						FString::Printf(TEXT("Graph exported to %s"), *SavePath));
-				}
-				else
-				{
-					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, ErrorMsg);
-				}
-			}
-
-			// Let Blueprint restore any widgets that were hidden
-			OnAfterExportScreenshot();
-		});
-	});
+    WriteGraphPNG(MoveTemp(CroppedPixels), CropWidth, CropHeight, SavePath);
 }
 
-FRow AViewer::GetRow(FString inStr) {
-	FRow outRow;
-
-	inStr.ParseIntoArray(outRow.stringData, TEXT(" "), true);
-
-	for (FString dataS : outRow.stringData) {
-		outRow.data.Add(FCString::Atof(*dataS));
-	}
-
-	// Safely calculate timeMinutes only if we have enough data columns
-	if (outRow.data.Num() >= 4) {
-		outRow.timeMinutes = (outRow.data[2] * 60.0f) + outRow.data[3];
-	} else {
-		outRow.timeMinutes = 0.0f;
-		UE_LOG(LogTemp, Warning, TEXT("GetRow: Not enough data columns (got %d, expected at least 4)"), outRow.data.Num());
-	}
-
-	return outRow;
-
-
-
+FRow AViewer::GetRow(FString inStr)
+{
+    FRow Row; IMFImport::Tokenize(inStr, Row.stringData);
+    for (const FString& Token : Row.stringData)
+    {
+        double V; Row.data.Add(IMFImport::ParseNumber(Token, V) && FMath::IsFinite(float(V)) ? float(V) : NAN);
+    }
+    if (Row.data.Num() >= 4 && FMath::IsFinite(Row.data[2]) && FMath::IsFinite(Row.data[3])) Row.timeMinutes = double(Row.data[2]) * 60 + Row.data[3];
+    return Row;
 }
-
-
 float AViewer::AverageColumn(const FString& equation, const FString& startTime, const FString& endTime, FString& outErrorMessage)
 {
-	outErrorMessage = TEXT("");
-	
-	// Check if we have data
-	if (imfData.Num() == 0) {
-		outErrorMessage = TEXT("No data loaded");
-		return 0.0f;
-	}
-	
-	// Check if equation is empty
-	if (equation.IsEmpty()) {
-		outErrorMessage = TEXT("Equation is empty");
-		return 0.0f;
-	}
-	
-	// Parse start time using TimeStringToMinutes
-	float startMins = 0.0f;
-	FString startTimeError;
-	if (!AIMFWindow::TimeStringToMinutes(startTime, startMins, startTimeError)) {
-		outErrorMessage = FString::Printf(TEXT("Invalid start time: %s"), *startTimeError);
-		return 0.0f;
-	}
-	
-	// Parse end time using TimeStringToMinutes
-	float endMins = 0.0f;
-	FString endTimeError;
-	if (!AIMFWindow::TimeStringToMinutes(endTime, endMins, endTimeError)) {
-		outErrorMessage = FString::Printf(TEXT("Invalid end time: %s"), *endTimeError);
-		return 0.0f;
-	}
-	
-	// Validate time range
-	if (startMins > endMins) {
-		outErrorMessage = TEXT("Start time must be before end time");
-		return 0.0f;
-	}
-	
-	float sum = 0.0f;
-	int validCount = 0;
-	int errorCount = 0;
-	FString lastError;
-	
-	for (const FRow& row : imfData) {
-		// Check if this row's time is within the range (inclusive)
-		if (row.timeMinutes >= startMins && row.timeMinutes <= endMins) {
-			// Evaluate the equation for this row
-			bool bSuccess = false;
-			FString evalError;
-			EAngleMode currentAngleMode = (imfWindow != nullptr) ? imfWindow->angleMode : EAngleMode::Radians;
-			float value = AIMFWindow::EvaluateEquationForRow(equation, row.data, bSuccess, evalError, currentAngleMode);
-			
-			if (bSuccess) {
-				sum += value;
-				validCount++;
-			}
-			else {
-				errorCount++;
-				lastError = evalError;
-			}
-		}
-	}
-	
-	// Check if we got any valid data points
-	if (validCount == 0) {
-		if (errorCount > 0) {
-			outErrorMessage = FString::Printf(TEXT("No valid data points. Last error: %s"), *lastError);
-		}
-		else {
-			outErrorMessage = TEXT("No data points found in time range");
-		}
-		return 0.0f;
-	}
-	
-	float result = sum / (float)validCount;
-	
-	// Final safety check
-	if (FMath::IsNaN(result) || !FMath::IsFinite(result)) {
-		outErrorMessage = TEXT("Calculation resulted in invalid value");
-		return 0.0f;
-	}
-	
-	return result;
+    return AverageWithMode(equation, startTime, endTime, AIMFWindow::IsClockExpression(equation), outErrorMessage);
 }
-
-
-
-
-
 
 
 float AViewer::TimeStringToNormalized(const FString& timeStr, bool& bSuccess, FString& outError)

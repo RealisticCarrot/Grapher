@@ -1,0 +1,44 @@
+{
+  "year": 1,
+  "doy": 2,
+  "month": 0,
+  "day": 0,
+  "hour": 3,
+  "minute": 4,
+  "second": 0,
+  "skipLines": -1,
+  "gapSeconds": 90,
+  "source": "Test3.lst; quantity/frame/units unassigned",
+  "columns": [
+    {
+      "label": "Year",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "DOY",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Hour",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Minute",
+      "units": "",
+      "frame": "",
+      "fill": ""
+    },
+    {
+      "label": "Col5",
+      "units": "",
+      "frame": "",
+      "fill": "9999.99"
+    }
+  ]
+}
